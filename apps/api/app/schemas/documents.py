@@ -1,0 +1,44 @@
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.entities import ProcessingStatus
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    original_name: str
+    title: str | None
+    file_size: int
+    page_count: int
+    searchable_page_count: int
+    status: ProcessingStatus
+    processing_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentDetailResponse(DocumentResponse):
+    scanned_page_numbers: list[int] = Field(default_factory=list)
+    chunk_count: int = 0
+
+
+class UploadResponse(BaseModel):
+    documents: list[DocumentResponse]
+    rejected: list["RejectedUpload"] = Field(default_factory=list)
+
+
+class RejectedUpload(BaseModel):
+    filename: str
+    code: str
+    message: str
+
+
+class ProcessingStatusResponse(BaseModel):
+    id: str
+    status: ProcessingStatus
+    processing_error: str | None
+    page_count: int
+    searchable_page_count: int

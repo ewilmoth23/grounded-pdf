@@ -1,0 +1,43 @@
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments, caches, and reports
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+
+# Web dependencies, builds, and browser-test output
+node_modules/
+dist/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Application data, uploaded documents, and local model artifacts
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+sample_documents/*.pdf
+*.gguf
+*.safetensors
+uploads/
+models/
+huggingface/

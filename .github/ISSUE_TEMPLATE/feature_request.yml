@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a focused improvement consistent with local, grounded PDF research
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Keep proposals focused on local, verifiable PDF research. Do not include private data.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and the roadmap for a similar proposal.
+          required: true
+        - label: This request does not require attaching private documents or credentials.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem is not handled today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable behavior, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Grounding, privacy, and scope
+      description: Explain effects on citations, local data, dependencies, and version 1 boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List concrete user-visible outcomes that would make the request complete.
+    validations:
+      required: true

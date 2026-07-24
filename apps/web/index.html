@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#191e1d" />
+    <meta name="description" content="Local-first PDF answers with verifiable citations" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>GroundedPDF</title>
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('groundedpdf-theme');
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var root = document.documentElement;
+          root.classList.toggle('dark', dark);
+          root.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (error) {
+          /* theme preference is unavailable; default styles apply */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,82 @@
+name: Bug report
+description: Report a reproducible GroundedPDF defect without private data
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a reproducible defect. Never attach confidential PDFs, API keys,
+        private logs, personal paths, or document content. Reproduce with synthetic or public data.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I can reproduce this with synthetic or public data.
+          required: true
+        - label: I removed credentials, private paths, and document content from this report.
+          required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Upload and document processing
+        - Retrieval and citations
+        - Chat provider and streaming
+        - PDF viewer
+        - Web interface
+        - Docker and installation
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and any safe error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide minimal, numbered steps using the repository sample or other public data.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options: [Local development, Docker Compose, Other]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Environment
+      description: GroundedPDF version, OS, Python, Node, browser, model provider and model.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Include only the smallest relevant excerpt after removing sensitive values.
+      render: shell
+  - type: textarea
+    id: regression
+    attributes:
+      label: Regression information
+      description: Did this work in an earlier GroundedPDF version or commit?

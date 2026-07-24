@@ -1,0 +1,269 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+from starlette.concurrency import run_in_threadpool
+
+from app.core.config import Settings, get_settings
+from app.core.exceptions import GroundedPdfError
+from app.db.session import get_db
+from app.models.entities import Conversation, ConversationDocument, Document, Message, utc_now
+from app.providers.factory import create_chat_provider
+from app.rag.chat import ChatService
+from app.rag.grounding import StreamingCitationFilter
+from app.rag.retrieval import Retriever
+from app.schemas.common import DeleteResponse
+from app.schemas.conversations import (
+    AnswerResponse,
+    ConversationCreate,
+    ConversationDetailResponse,
+    ConversationDocumentsUpdate,
+    ConversationRename,
+    ConversationResponse,
+    MessageResponse,
+    QuestionRequest,
+)
+from app.services.dependencies import get_embedding_provider, get_vector_store
+from app.services.settings import effective_settings
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def require_conversation(db: Session, conversation_id: str) -> Conversation:
+    conversation = db.scalar(
+        select(Conversation)
+        .options(selectinload(Conversation.document_links), selectinload(Conversation.messages))
+        .where(Conversation.id == conversation_id)
+    )
+    if conversation is None:
+        raise GroundedPdfError(
+            "Conversation not found", code="conversation_not_found", status_code=404
+        )
+    return conversation
+
+
+def to_response(conversation: Conversation) -> ConversationResponse:
+    return ConversationResponse(
+        id=conversation.id,
+        title=conversation.title,
+        document_ids=[link.document_id for link in conversation.document_links],
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+    )
+
+
+def make_chat_service(db: Session, base: Settings) -> ChatService:
+    runtime = effective_settings(db, base)
+    retriever = Retriever(runtime, get_embedding_provider(), get_vector_store())
+    return ChatService(runtime, retriever, create_chat_provider(runtime))
+
+
+def set_documents(db: Session, conversation: Conversation, document_ids: list[str]) -> None:
+    unique_ids = list(dict.fromkeys(document_ids))
+    existing_ids = set(
+        db.scalars(select(Document.id).where(Document.id.in_(unique_ids))) if unique_ids else []
+    )
+    missing = set(unique_ids) - existing_ids
+    if missing:
+        raise GroundedPdfError(
+            "One or more selected documents do not exist",
+            code="document_not_found",
+            status_code=404,
+        )
+    conversation.document_links.clear()
+    conversation.document_links.extend(
+        ConversationDocument(document_id=document_id) for document_id in unique_ids
+    )
+    conversation.updated_at = utc_now()
+
+
+@router.post("", response_model=ConversationResponse, status_code=201)
+def create_conversation(
+    payload: ConversationCreate, db: Session = Depends(get_db)
+) -> ConversationResponse:
+    conversation = Conversation(title=payload.title.strip())
+    db.add(conversation)
+    db.flush()
+    set_documents(db, conversation, payload.document_ids)
+    db.commit()
+    db.refresh(conversation)
+    return to_response(conversation)
+
+
+@router.get("", response_model=list[ConversationResponse])
+def list_conversations(db: Session = Depends(get_db)) -> list[ConversationResponse]:
+    conversations = db.scalars(
+        select(Conversation)
+        .options(selectinload(Conversation.document_links))
+        .order_by(Conversation.updated_at.desc())
+    )
+    return [to_response(conversation) for conversation in conversations]
+
+
+@router.get("/{conversation_id}", response_model=ConversationDetailResponse)
+def get_conversation(
+    conversation_id: str, db: Session = Depends(get_db)
+) -> ConversationDetailResponse:
+    conversation = db.scalar(
+        select(Conversation)
+        .options(
+            selectinload(Conversation.document_links),
+            selectinload(Conversation.messages).selectinload(Message.citations),
+        )
+        .where(Conversation.id == conversation_id)
+    )
+    if conversation is None:
+        raise GroundedPdfError(
+            "Conversation not found", code="conversation_not_found", status_code=404
+        )
+    return ConversationDetailResponse(
+        **to_response(conversation).model_dump(),
+        messages=[MessageResponse.model_validate(message) for message in conversation.messages],
+    )
+
+
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+def rename_conversation(
+    conversation_id: str, payload: ConversationRename, db: Session = Depends(get_db)
+) -> ConversationResponse:
+    conversation = require_conversation(db, conversation_id)
+    conversation.title = payload.title.strip()
+    db.commit()
+    return to_response(conversation)
+
+
+@router.put("/{conversation_id}/documents", response_model=ConversationResponse)
+def update_conversation_documents(
+    conversation_id: str,
+    payload: ConversationDocumentsUpdate,
+    db: Session = Depends(get_db),
+) -> ConversationResponse:
+    conversation = require_conversation(db, conversation_id)
+    set_documents(db, conversation, payload.document_ids)
+    db.commit()
+    return to_response(conversation)
+
+
+@router.delete("/{conversation_id}", response_model=DeleteResponse)
+def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> DeleteResponse:
+    conversation = require_conversation(db, conversation_id)
+    db.delete(conversation)
+    db.commit()
+    return DeleteResponse(deleted=True, id=conversation_id)
+
+
+@router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
+def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[Message]:
+    require_conversation(db, conversation_id)
+    return list(
+        db.scalars(
+            select(Message)
+            .options(selectinload(Message.citations))
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at)
+        )
+    )
+
+
+@router.post("/{conversation_id}/messages", response_model=AnswerResponse)
+async def submit_question(
+    conversation_id: str,
+    payload: QuestionRequest,
+    db: Session = Depends(get_db),
+    base: Settings = Depends(get_settings),
+) -> AnswerResponse:
+    service = make_chat_service(db, base)
+    user_message, citations, prompt = await run_in_threadpool(
+        service.prepare, db, conversation_id, payload.question
+    )
+    parts = [token async for token in service.tokens(prompt)]
+    assistant = await run_in_threadpool(
+        service.persist_answer, db, conversation_id, "".join(parts), citations
+    )
+    return AnswerResponse(
+        user_message=MessageResponse.model_validate(user_message),
+        assistant_message=MessageResponse.model_validate(assistant),
+    )
+
+
+@router.post("/{conversation_id}/messages/stream")
+async def stream_question(
+    conversation_id: str,
+    payload: QuestionRequest,
+    db: Session = Depends(get_db),
+    base: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    service = make_chat_service(db, base)
+    user_message, citations, prompt = await run_in_threadpool(
+        service.prepare, db, conversation_id, payload.question
+    )
+
+    async def events() -> AsyncIterator[str]:
+        metadata = {
+            "user_message": MessageResponse.model_validate(user_message).model_dump(mode="json"),
+            "citations": [
+                {
+                    "id": f"pending-{citation.ordinal}",
+                    "document_id": citation.document_id,
+                    "document_name": citation.document_name,
+                    "page_number": citation.page_number,
+                    "excerpt": citation.excerpt,
+                    "retrieval_score": citation.score,
+                    "ordinal": citation.ordinal,
+                }
+                for citation in citations
+            ],
+        }
+        yield f"event: metadata\ndata: {json.dumps(metadata)}\n\n"
+        answer = ""
+        citation_filter = StreamingCitationFilter(citations)
+        try:
+            async for token in service.tokens(prompt):
+                safe_token = citation_filter.feed(token)
+                if safe_token:
+                    answer += safe_token
+                    yield f"event: token\ndata: {json.dumps({'token': safe_token})}\n\n"
+            trailing_text = citation_filter.finish()
+            if trailing_text:
+                answer += trailing_text
+                yield f"event: token\ndata: {json.dumps({'token': trailing_text})}\n\n"
+            cited_answer = service.finalize_answer(answer, citations)
+            if cited_answer != answer and cited_answer.startswith(answer):
+                suffix = cited_answer[len(answer) :]
+                yield f"event: token\ndata: {json.dumps({'token': suffix})}\n\n"
+            answer = cited_answer
+            assistant = await run_in_threadpool(
+                service.persist_answer, db, conversation_id, answer, citations
+            )
+            done = MessageResponse.model_validate(assistant).model_dump(mode="json")
+            yield f"event: done\ndata: {json.dumps(done)}\n\n"
+        except asyncio.CancelledError:
+            db.rollback()
+            raise
+        except GroundedPdfError as exc:
+            db.rollback()
+            error = {"code": exc.code, "message": exc.message, "status": exc.status_code}
+            yield f"event: error\ndata: {json.dumps(error)}\n\n"
+        except Exception:
+            db.rollback()
+            logger.exception("streaming_answer_failed", extra={"conversation_id": conversation_id})
+            error = {
+                "code": "internal_error",
+                "message": "The answer stream failed unexpectedly. Retry the question.",
+                "status": 500,
+            }
+            yield f"event: error\ndata: {json.dumps(error)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

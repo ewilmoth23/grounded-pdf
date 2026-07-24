@@ -1,0 +1,66 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      GROUNDEDPDF_ENVIRONMENT: production
+      GROUNDEDPDF_DATA_DIR: /data
+      GROUNDEDPDF_DATABASE_URL: sqlite:////data/groundedpdf.db
+      GROUNDEDPDF_CORS_ORIGINS: '["http://localhost:8080","http://127.0.0.1:8080"]'
+      GROUNDEDPDF_MAX_UPLOAD_MB: ${GROUNDEDPDF_MAX_UPLOAD_MB:-50}
+      GROUNDEDPDF_MAX_UPLOAD_BATCH_MB: ${GROUNDEDPDF_MAX_UPLOAD_BATCH_MB:-200}
+      GROUNDEDPDF_MAX_UPLOAD_FILES: ${GROUNDEDPDF_MAX_UPLOAD_FILES:-20}
+      GROUNDEDPDF_RATE_LIMIT_PER_MINUTE: ${GROUNDEDPDF_RATE_LIMIT_PER_MINUTE:-60}
+      GROUNDEDPDF_EMBEDDING_MODEL: ${GROUNDEDPDF_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      GROUNDEDPDF_CHUNK_SIZE: ${GROUNDEDPDF_CHUNK_SIZE:-900}
+      GROUNDEDPDF_CHUNK_OVERLAP: ${GROUNDEDPDF_CHUNK_OVERLAP:-150}
+      GROUNDEDPDF_RETRIEVAL_COUNT: ${GROUNDEDPDF_RETRIEVAL_COUNT:-6}
+      GROUNDEDPDF_RETRIEVAL_MIN_SCORE: ${GROUNDEDPDF_RETRIEVAL_MIN_SCORE:-0.15}
+      GROUNDEDPDF_RETRIEVAL_SEMANTIC_CONFIDENCE_SCORE: ${GROUNDEDPDF_RETRIEVAL_SEMANTIC_CONFIDENCE_SCORE:-0.45}
+      GROUNDEDPDF_MODEL_PROVIDER: ${GROUNDEDPDF_MODEL_PROVIDER:-ollama}
+      GROUNDEDPDF_MODEL_NAME: ${GROUNDEDPDF_MODEL_NAME:-llama3.2:3b}
+      GROUNDEDPDF_OLLAMA_BASE_URL: ${GROUNDEDPDF_DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      GROUNDEDPDF_OPENAI_BASE_URL: ${GROUNDEDPDF_DOCKER_OPENAI_BASE_URL:-http://host.docker.internal:8001/v1}
+      GROUNDEDPDF_OPENAI_API_KEY: ${GROUNDEDPDF_OPENAI_API_KEY:-}
+      GROUNDEDPDF_TEMPERATURE: ${GROUNDEDPDF_TEMPERATURE:-0.1}
+      GROUNDEDPDF_MAX_OUTPUT_TOKENS: ${GROUNDEDPDF_MAX_OUTPUT_TOKENS:-800}
+      GROUNDEDPDF_MODEL_TIMEOUT_SECONDS: ${GROUNDEDPDF_MODEL_TIMEOUT_SECONDS:-120}
+    volumes:
+      - groundedpdf_data:/data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:8000:8000"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=${GROUNDEDPDF_UPLOAD_TMPFS_MB:-256}m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_BASE_URL: /api/v1
+        MAX_UPLOAD_BATCH_MB: ${GROUNDEDPDF_MAX_UPLOAD_BATCH_MB:-200}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+volumes:
+  groundedpdf_data:
