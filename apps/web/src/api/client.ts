@@ -3,6 +3,7 @@ import type {
   ConversationDetail,
   DocumentRecord,
   SafeSettings,
+  SearchResult,
   UploadResult,
   Verification,
 } from '../types/api';
@@ -107,6 +108,13 @@ export const api = {
       request<{ deleted: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     verify: (id: string, messageId: string) =>
       request<Verification>(`/conversations/${id}/messages/${messageId}/verify`),
+  },
+  search: {
+    query: (q: string, documentIds: string[] = []) => {
+      const params = new URLSearchParams({ q });
+      documentIds.forEach((id) => params.append('document_ids', id));
+      return request<SearchResult>(`/search?${params.toString()}`);
+    },
   },
   settings: {
     get: () => request<SafeSettings>('/settings'),

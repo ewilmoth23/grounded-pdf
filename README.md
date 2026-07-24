@@ -46,6 +46,9 @@ document content or fabricated interface is shown._
   cited passage highlighted when text geometry allows
 - Claim-level answer verification: each sentence of a saved answer is checked against your
   documents and labeled supported, weak, or not found, with links to the matched evidence
+- Instant semantic quote search: a Search view in the navigation (⌘K / Ctrl+K) embeds your query
+  locally and returns exact stored passages with document, page, and match strength — no model
+  call, with deep links into the highlighted viewer
 - Conversation history, document selection, retryable processing, and complete deletion
 - Responsive React interface, safe Markdown rendering, dark mode, and a PDF.js page viewer
 - Deterministic test provider and synthetic PDF; automated tests do not require model access

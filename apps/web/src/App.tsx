@@ -5,6 +5,7 @@ import { AppLayout } from './layouts/AppLayout';
 import { ChatPage } from './pages/ChatPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { SearchPage } from './pages/SearchPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 const PdfViewerPage = lazy(() =>
@@ -34,6 +35,7 @@ export function App() {
         />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:conversationId" element={<ChatPage />} />
+        <Route path="search" element={<SearchPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

@@ -110,6 +110,16 @@ source is rebuilt from relational chunk records before it reaches the client. Th
 never modified; results are cached in-process per message because messages are immutable, and the
 fixed insufficient-evidence response verifies to an empty result.
 
+### Semantic quote search
+
+Quote search is a deterministic, retrieval-only path that reuses the retrieval trust boundary
+without a model. `GET /search` embeds the query locally, filters the vector store to ready
+documents (optionally narrowed to a caller-selected subset of them), applies only the low
+retrieval score floor for recall, and rebuilds every candidate from relational chunk and document
+records before returning document, page, excerpt, and score. No chat provider is involved and
+nothing is generated: the response contains only text stored during ingestion, which is why the
+search view can promise exact passages from the user's documents.
+
 ### Provider abstraction
 
 `ChatProvider` exposes two operations: token streaming and a health check. Ollama and generic OpenAI-

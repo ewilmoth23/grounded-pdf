@@ -58,6 +58,20 @@ export interface Verification {
   sentences: VerificationSentence[];
 }
 
+export interface SearchMatch {
+  document_id: string;
+  document_name: string;
+  page_number: number;
+  excerpt: string;
+  score: number;
+}
+
+export interface SearchResult {
+  query: string;
+  documents_available: boolean;
+  matches: SearchMatch[];
+}
+
 export interface Conversation {
   id: string;
   title: string;

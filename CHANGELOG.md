@@ -24,6 +24,11 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Added
 
+- Instant semantic quote search: a Search page (⌘K / Ctrl+K from anywhere) embeds the query
+  locally and returns exact stored passages — document, page badge, excerpt with the query terms
+  emphasized, and a match-strength indicator — each deep-linking into the highlighted PDF viewer.
+  The `GET /search` endpoint is retrieval-only: every vector match is revalidated against
+  relational chunk records, no chat provider is involved, and nothing is generated.
 - Claim-level verification: a "Verify answer" action on each completed assistant message splits
   the saved answer into sentences with a deterministic rule-based splitter, scores each sentence
   against the conversation's documents (cosine similarity plus term overlap), and renders a

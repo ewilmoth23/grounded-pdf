@@ -1,6 +1,6 @@
-import { FileText, Menu, MessageSquareText, Settings, X } from 'lucide-react';
-import { useCallback, useState } from 'react';
-import { NavLink, Outlet } from 'react-router';
+import { FileText, Menu, MessageSquareText, Search, Settings, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { Logo } from '../components/Logo';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useTheme } from '../hooks/useTheme';
@@ -8,8 +8,25 @@ import { useTheme } from '../hooks/useTheme';
 const links = [
   { to: '/documents', label: 'Documents', icon: FileText },
   { to: '/chat', label: 'Chat', icon: MessageSquareText },
+  { to: '/search', label: 'Search', icon: Search },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
+
+/** ⌘K / Ctrl+K anywhere in the app opens quote search (the page focuses its input). */
+function useSearchShortcut() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        if (pathname !== '/search') void navigate('/search');
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate, pathname]);
+}
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -46,6 +63,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 export function AppLayout() {
   // Keeps the html `dark` class managed on every page, not just Settings.
   useTheme();
+  useSearchShortcut();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
   useModalBehavior(mobileOpen, closeMobile);
