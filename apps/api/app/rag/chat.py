@@ -130,11 +130,18 @@ class ChatService:
         )
         db.add(user_message)
         conversation.updated_at = utc_now()
+        # The question is committed only after retrieval succeeds, so a
+        # retrieval failure never leaves an orphaned question behind.
+        try:
+            db.flush()
+            matches = self._validated_matches(
+                db, self.retriever.retrieve(question, ready_ids), ready_ids
+            )
+        except Exception:
+            db.rollback()
+            raise
         db.commit()
         db.refresh(user_message)
-        matches = self._validated_matches(
-            db, self.retriever.retrieve(question, ready_ids), ready_ids
-        )
         if not matches:
             return user_message, [], None
         citations = build_citations(matches, maximum=self.settings.retrieval_count)
@@ -197,27 +204,36 @@ class ChatService:
         )
         db.add(user_message)
         conversation.updated_at = utc_now()
-        db.commit()
-        db.refresh(user_message)
+        # As in prepare(): commit the question only after every per-document
+        # retrieval succeeds, so failures never leave an orphaned question.
         sections: list[CompareSection] = []
         next_ordinal = 1
-        for document in ordered:
-            matches = self._validated_matches(
-                db, self.retriever.retrieve(question, [document.id]), [document.id]
-            )
-            section = CompareSection(document_id=document.id, document_name=document.original_name)
-            if matches:
-                section.citations = [
-                    replace(citation, ordinal=next_ordinal + index)
-                    for index, citation in enumerate(
-                        build_citations(matches, maximum=self.settings.retrieval_count)
-                    )
-                ]
-                next_ordinal += len(section.citations)
-                section.prompt = build_user_prompt(
-                    question, select_cited_matches(matches, section.citations)
+        try:
+            db.flush()
+            for document in ordered:
+                matches = self._validated_matches(
+                    db, self.retriever.retrieve(question, [document.id]), [document.id]
                 )
-            sections.append(section)
+                section = CompareSection(
+                    document_id=document.id, document_name=document.original_name
+                )
+                if matches:
+                    section.citations = [
+                        replace(citation, ordinal=next_ordinal + index)
+                        for index, citation in enumerate(
+                            build_citations(matches, maximum=self.settings.retrieval_count)
+                        )
+                    ]
+                    next_ordinal += len(section.citations)
+                    section.prompt = build_user_prompt(
+                        question, select_cited_matches(matches, section.citations)
+                    )
+                sections.append(section)
+        except Exception:
+            db.rollback()
+            raise
+        db.commit()
+        db.refresh(user_message)
         return user_message, sections
 
     async def compare_events(self, sections: list[CompareSection]) -> AsyncIterator[str]:

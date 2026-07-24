@@ -55,7 +55,10 @@ errors, and stream Server-Sent Events. They do not parse PDFs or construct vecto
 
 SQLite stores documents, pages, chunks, processing attempts, conversations, selected-document links,
 messages, citations, and permitted runtime settings. Foreign keys and delete cascades make the
-relational cleanup boundary explicit. Alembic is the schema authority.
+relational cleanup boundary explicit, with one deliberate exception: citations reference their
+document with `ON DELETE SET NULL` and carry snapshot columns (document name, page number,
+excerpt), so deleting a document severs the link without erasing the evidence trail of historical
+answers. Alembic is the schema authority.
 
 ### File storage
 
@@ -161,7 +164,10 @@ relational storage.
 
 Deletion first commits a durable `deleted` tombstone, then removes vectors and the stored file before
 deleting the relational row. If external cleanup or the final database commit fails, the tombstone
-remains visible and the operation can be retried safely.
+remains visible and the operation can be retried safely. Deleting a document removes its pages,
+chunks, jobs, and conversation selections by cascade, while citation rows survive with a nulled
+document reference: their snapshot columns keep past answers verifiable, and the client renders
+them as non-navigable "source deleted" cards.
 
 ## Dependency boundaries
 

@@ -104,8 +104,9 @@ def test_optional_ocr_replaces_unsearchable_page_text(tmp_path: Path) -> None:
     document.close()
 
     class FakeOcr:
-        def extract(self, document_path: Path, page_number: int) -> str:
-            assert document_path == path
+        def extract(self, document: fitz.Document, page_number: int) -> str:
+            # The already-open document is passed in; OCR must not reopen the file.
+            assert document.page_count == 1
             assert page_number == 1
             return "Tesseract recovered enough verified text from this scanned page."
 

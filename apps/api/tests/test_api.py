@@ -12,7 +12,15 @@ from app.core.config import Settings
 from app.core.exceptions import GroundedPdfError
 from app.core.middleware import RateLimitMiddleware, RequestSizeLimitMiddleware
 from app.main import app as main_app
-from app.models.entities import ApplicationSetting, Document, ProcessingStatus
+from app.main import create_app
+from app.models.entities import (
+    ApplicationSetting,
+    Conversation,
+    Document,
+    Message,
+    MessageRole,
+    ProcessingStatus,
+)
 from app.services.settings import index_fingerprint
 
 
@@ -413,6 +421,97 @@ def test_document_detail_serves_stored_outline(
     assert detail["stale_index"] is False
 
     assert client.get(f"/api/v1/documents/{plain.id}").json()["outline"] is None
+
+
+def test_document_list_pagination_and_total_count(
+    client: TestClient, db: Session, settings: Settings
+) -> None:
+    current = index_fingerprint(settings)
+    for index in range(5):
+        _add_indexed_document(db, f"paged{index}", ProcessingStatus.READY, current)
+
+    full = client.get("/api/v1/documents")
+    assert full.status_code == 200
+    assert full.headers["X-Total-Count"] == "5"
+    assert len(full.json()) == 5
+
+    page = client.get("/api/v1/documents", params={"limit": 2, "offset": 1})
+    assert page.status_code == 200
+    assert page.headers["X-Total-Count"] == "5"
+    assert [item["id"] for item in page.json()] == [item["id"] for item in full.json()[1:3]]
+
+    assert client.get("/api/v1/documents", params={"limit": 501}).status_code == 422
+    assert client.get("/api/v1/documents", params={"offset": -1}).status_code == 422
+
+
+def test_conversation_list_pagination_and_total_count(client: TestClient) -> None:
+    for index in range(3):
+        created = client.post("/api/v1/conversations", json={"title": f"paged {index}"})
+        assert created.status_code == 201
+
+    full = client.get("/api/v1/conversations")
+    assert full.headers["X-Total-Count"] == "3"
+    assert len(full.json()) == 3
+
+    page = client.get("/api/v1/conversations", params={"limit": 1, "offset": 1})
+    assert page.headers["X-Total-Count"] == "3"
+    assert [item["id"] for item in page.json()] == [full.json()[1]["id"]]
+
+    assert client.get("/api/v1/conversations", params={"limit": 0}).status_code == 422
+
+
+def test_message_list_pagination_and_total_count(client: TestClient, db: Session) -> None:
+    conversation = Conversation(title="Paged history")
+    db.add(conversation)
+    db.flush()
+    for index in range(4):
+        db.add(
+            Message(
+                conversation_id=conversation.id, role=MessageRole.USER, content=f"question {index}"
+            )
+        )
+    db.commit()
+
+    full = client.get(f"/api/v1/conversations/{conversation.id}/messages")
+    assert full.headers["X-Total-Count"] == "4"
+    assert len(full.json()) == 4
+
+    page = client.get(
+        f"/api/v1/conversations/{conversation.id}/messages", params={"limit": 2, "offset": 2}
+    )
+    assert page.headers["X-Total-Count"] == "4"
+    assert [item["id"] for item in page.json()] == [item["id"] for item in full.json()[2:4]]
+
+    missing = client.get("/api/v1/conversations/absent/messages")
+    assert missing.status_code == 404
+
+
+def test_docs_and_openapi_are_disabled_in_production(tmp_path: Path) -> None:
+    production_app = create_app(
+        Settings(
+            environment="production",
+            model_provider="ollama",
+            data_dir=tmp_path / "production-data",
+            database_url=f"sqlite:///{tmp_path / 'production.db'}",
+        )
+    )
+    with TestClient(production_app) as production_client:
+        assert production_client.get("/docs").status_code == 404
+        assert production_client.get("/openapi.json").status_code == 404
+        assert "docs" not in production_client.get("/").json()
+
+    development_app = create_app(
+        Settings(
+            environment="test",
+            model_provider="mock",
+            data_dir=tmp_path / "test-data",
+            database_url=f"sqlite:///{tmp_path / 'test.db'}",
+        )
+    )
+    with TestClient(development_app) as development_client:
+        assert development_client.get("/docs").status_code == 200
+        assert development_client.get("/openapi.json").status_code == 200
+        assert development_client.get("/").json()["docs"] == "/docs"
 
 
 def test_conversation_crud_and_document_selection(client: TestClient) -> None:

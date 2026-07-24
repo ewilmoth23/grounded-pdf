@@ -27,7 +27,9 @@ class CitationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    document_id: str
+    # None once the cited document has been deleted; the snapshot fields below
+    # keep the citation renderable.
+    document_id: str | None
     document_name: str
     page_number: int
     excerpt: str

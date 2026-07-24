@@ -33,6 +33,10 @@ from app.services.vector_store import VectorRecord, VectorStore
 
 logger = logging.getLogger(__name__)
 
+# Chunks are embedded and upserted in bounded slices so large documents do not
+# hold every vector in memory at once.
+EMBEDDING_BATCH_SIZE = 256
+
 
 def _serialize_outline(extracted: ExtractedDocument) -> str | None:
     if not extracted.outline:
@@ -170,29 +174,31 @@ class IngestionService:
                 )
                 return
 
-            vectors = self.embeddings.embed(
-                [stored_chunk.normalized_text for stored_chunk in pending_chunks]
-            )
             for stored_chunk in pending_chunks:
                 db.add(stored_chunk)
             db.flush()
-            self.vector_store.upsert(
-                [
-                    VectorRecord(
-                        id=stored_chunk.embedding_id,
-                        text=stored_chunk.normalized_text,
-                        embedding=vector,
-                        metadata={
-                            "document_id": document_id,
-                            "document_name": document.original_name,
-                            "page_number": stored_chunk.page_number,
-                            "chunk_index": stored_chunk.chunk_index,
-                            "chunk_id": stored_chunk.id,
-                        },
-                    )
-                    for stored_chunk, vector in zip(pending_chunks, vectors, strict=True)
-                ]
-            )
+            for start in range(0, len(pending_chunks), EMBEDDING_BATCH_SIZE):
+                batch = pending_chunks[start : start + EMBEDDING_BATCH_SIZE]
+                vectors = self.embeddings.embed(
+                    [stored_chunk.normalized_text for stored_chunk in batch]
+                )
+                self.vector_store.upsert(
+                    [
+                        VectorRecord(
+                            id=stored_chunk.embedding_id,
+                            text=stored_chunk.normalized_text,
+                            embedding=vector,
+                            metadata={
+                                "document_id": document_id,
+                                "document_name": document.original_name,
+                                "page_number": stored_chunk.page_number,
+                                "chunk_index": stored_chunk.chunk_index,
+                                "chunk_id": stored_chunk.id,
+                            },
+                        )
+                        for stored_chunk, vector in zip(batch, vectors, strict=True)
+                    ]
+                )
             document.title = (extracted.title or "")[:500] or None
             document.page_count = extracted.page_count
             document.searchable_page_count = sum(page.is_searchable for page in extracted.pages)

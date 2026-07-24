@@ -117,27 +117,53 @@ export const MessageBubble = memo(function MessageBubble({
             </summary>
             <ul className="mt-3 space-y-2">
               {message.citations.map((citation) => (
-                <li key={`${citation.document_id}-${citation.page_number}-${citation.ordinal}`}>
-                  <Link
-                    to={`/documents/${citation.document_id}/view?page=${citation.page_number}&highlight=${encodeURIComponent(highlightParamValue(citation.excerpt))}`}
-                    state={{ returnTo: location.pathname, highlight: citation.excerpt }}
-                    className="group/source block rounded-lg border bg-ink-50 p-3 transition-all duration-150 hover:-translate-y-px hover:border-accent-400 hover:shadow dark:bg-ink-950"
-                    aria-label={`Open ${citation.document_name} page ${citation.page_number}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="flex min-w-0 items-center gap-2 font-semibold text-ink-800 dark:text-ink-100">
-                        <FileText className="size-4 shrink-0 text-accent-700 dark:text-accent-400" />
-                        <span className="truncate">{citation.document_name}</span>
-                        <span className="shrink-0 text-ink-500 dark:text-ink-400">
-                          p. {citation.page_number}
+                <li
+                  key={`${citation.document_id ?? 'deleted'}-${citation.page_number}-${citation.ordinal}`}
+                >
+                  {citation.document_id ? (
+                    <Link
+                      to={`/documents/${citation.document_id}/view?page=${citation.page_number}&highlight=${encodeURIComponent(highlightParamValue(citation.excerpt))}`}
+                      state={{ returnTo: location.pathname, highlight: citation.excerpt }}
+                      className="group/source block rounded-lg border bg-ink-50 p-3 transition-all duration-150 hover:-translate-y-px hover:border-accent-400 hover:shadow dark:bg-ink-950"
+                      aria-label={`Open ${citation.document_name} page ${citation.page_number}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex min-w-0 items-center gap-2 font-semibold text-ink-800 dark:text-ink-100">
+                          <FileText className="size-4 shrink-0 text-accent-700 dark:text-accent-400" />
+                          <span className="truncate">{citation.document_name}</span>
+                          <span className="shrink-0 text-ink-500 dark:text-ink-400">
+                            p. {citation.page_number}
+                          </span>
                         </span>
-                      </span>
-                      <ExternalLink className="size-3.5 shrink-0 text-ink-500 group-hover/source:text-accent-700 dark:text-ink-400 dark:group-hover/source:text-accent-400" />
+                        <ExternalLink className="size-3.5 shrink-0 text-ink-500 group-hover/source:text-accent-700 dark:text-ink-400 dark:group-hover/source:text-accent-400" />
+                      </div>
+                      <p className="mt-2 line-clamp-3 text-xs leading-5 text-ink-500 dark:text-ink-400">
+                        {citation.excerpt}
+                      </p>
+                    </Link>
+                  ) : (
+                    <div
+                      role="group"
+                      className="rounded-lg border border-dashed bg-ink-50 p-3 dark:bg-ink-950"
+                      aria-label={`${citation.document_name} page ${citation.page_number} (source deleted)`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex min-w-0 items-center gap-2 font-semibold text-ink-800 dark:text-ink-100">
+                          <FileText className="size-4 shrink-0 text-ink-400 dark:text-ink-500" />
+                          <span className="truncate">{citation.document_name}</span>
+                          <span className="shrink-0 text-ink-500 dark:text-ink-400">
+                            p. {citation.page_number}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-xs text-ink-500 dark:text-ink-400">
+                          Source deleted
+                        </span>
+                      </div>
+                      <p className="mt-2 line-clamp-3 text-xs leading-5 text-ink-500 dark:text-ink-400">
+                        {citation.excerpt}
+                      </p>
                     </div>
-                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-ink-500 dark:text-ink-400">
-                      {citation.excerpt}
-                    </p>
-                  </Link>
+                  )}
                 </li>
               ))}
             </ul>

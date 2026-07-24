@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.core.config import get_settings
+from app.providers.factory import clear_chat_provider_cache
 from app.rag.verification import clear_verification_cache
 from app.services.embeddings import (
     DeterministicEmbeddingProvider,
@@ -31,4 +32,5 @@ def get_vector_store() -> VectorStore:
 def clear_service_caches() -> None:
     get_embedding_provider.cache_clear()
     get_vector_store.cache_clear()
+    clear_chat_provider_cache()
     clear_verification_cache()

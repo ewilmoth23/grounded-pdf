@@ -50,6 +50,9 @@ not a substitute for human inspection.
 - [ ] `make docker-verify`
 - [ ] `npm --prefix apps/web audit --audit-level=high`
 - [ ] `.venv/bin/python -m pip check`
+- [ ] TODO: generate and commit a pinned Python lockfile (e.g. `uv lock` or
+      `pip-compile pyproject.toml -o apps/api/requirements.lock`) and switch the API Dockerfile to
+      install from it; `apps/api/requirements.runtime.txt` currently carries ranges, not pins.
 - [ ] Run a Python dependency vulnerability scan and a container-image scan under the repository
       owner's approved disclosure policy.
 

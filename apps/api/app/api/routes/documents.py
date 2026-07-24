@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Response, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -77,14 +77,25 @@ async def upload_documents(
 
 @router.get("", response_model=list[DocumentResponse])
 def list_documents(
-    db: Session = Depends(get_db), settings: Settings = Depends(get_settings)
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[DocumentResponse]:
     fingerprint = index_fingerprint(effective_settings(db, settings))
+    total = db.scalar(select(func.count(Document.id))) or 0
+    response.headers["X-Total-Count"] = str(total)
     responses: list[DocumentResponse] = []
-    for document in db.scalars(select(Document).order_by(Document.created_at.desc())):
-        response = DocumentResponse.model_validate(document)
-        response.stale_index = is_stale_index(document, fingerprint)
-        responses.append(response)
+    for document in db.scalars(
+        select(Document)
+        .order_by(Document.created_at.desc(), Document.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ):
+        item = DocumentResponse.model_validate(document)
+        item.stale_index = is_stale_index(document, fingerprint)
+        responses.append(item)
     return responses
 
 

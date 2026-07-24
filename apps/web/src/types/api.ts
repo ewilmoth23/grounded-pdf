@@ -34,7 +34,8 @@ export interface UploadResult {
 
 export interface Citation {
   id: string;
-  document_id: string;
+  /** Null once the cited document was deleted; the snapshot fields remain. */
+  document_id: string | null;
   document_name: string;
   page_number: number;
   excerpt: string;

@@ -178,7 +178,8 @@ make dev-api
 make dev-web
 ```
 
-Open <http://localhost:5173>. API documentation is available at <http://localhost:8000/docs>.
+Open <http://localhost:5173>. API documentation is available at <http://localhost:8000/docs>
+(served only outside the `production` environment).
 
 ### Optional OCR
 

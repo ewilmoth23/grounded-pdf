@@ -1,3 +1,10 @@
+# Runtime dependencies for the GroundedPDF API.
+#
+# This file mirrors [project.dependencies] in pyproject.toml and is what the
+# Docker image installs from. Keep the two lists identical when editing either.
+# These are ranges, not pins: generating and committing a fully pinned lockfile
+# (e.g. `uv lock` or `pip-compile` -> requirements.lock) is tracked in
+# RELEASE_CHECKLIST.md and should replace this file in the Dockerfile once done.
 alembic>=1.13,<2
 chromadb>=0.5,<2
 fastapi>=0.115,<1

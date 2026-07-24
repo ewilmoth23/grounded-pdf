@@ -188,7 +188,9 @@ def _scoped_document_ids(db: Session, message: Message) -> list[str]:
             ConversationDocument.conversation_id == message.conversation_id
         )
     )
-    cited = (citation.document_id for citation in message.citations)
+    cited = (
+        citation.document_id for citation in message.citations if citation.document_id is not None
+    )
     return list(dict.fromkeys([*selected, *cited]))
 
 

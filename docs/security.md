@@ -30,6 +30,10 @@ service by an already trusted local user.
 MIME headers alone are not trusted. Antivirus or content-disarm scanning is outside the local version 1
 scope and should be added before accepting documents from untrusted external users.
 
+Interactive API documentation (`/docs`, `/redoc`) and the `/openapi.json` schema are served only when
+`GROUNDEDPDF_ENVIRONMENT` is not `production`; the Docker stack runs in production mode and does not
+expose them.
+
 ## Model and content safety
 
 PDF text is untrusted content. The system prompt tells the provider not to follow instructions inside
@@ -48,9 +52,11 @@ those of the operating-system account or non-root container user. Docker uses on
 of that directory contain private source material and conversation history and must be protected.
 
 Deletion commits a retryable tombstone, removes vector records and the stored PDF, and then removes
-the document row; foreign-key cascades remove
-pages, chunks, processing jobs, conversation selections, and citations. Copies in filesystem backups,
-container snapshots, OS caches, or model-server logs are not controlled by the application.
+the document row; foreign-key cascades remove pages, chunks, processing jobs, and conversation
+selections. Citation rows persist as snapshots (document name, page number, excerpt) with their
+document reference set to NULL so conversation history stays verifiable; deleting the conversation
+removes them. Copies in filesystem backups, container snapshots, OS caches, or model-server logs
+are not controlled by the application.
 
 ## Secrets and logging
 

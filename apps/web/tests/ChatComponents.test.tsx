@@ -38,6 +38,35 @@ test('renders structured citations linked to the correct page', () => {
   );
 });
 
+test('citations from deleted documents render as non-clickable snapshots', () => {
+  renderApp(
+    <MessageBubble
+      message={{
+        id: 'message-1',
+        role: 'assistant',
+        content: 'The gain was 37 percent. [sample.pdf, p. 2]',
+        created_at: '2026-01-01T00:00:00Z',
+        citations: [
+          {
+            id: 'citation-1',
+            document_id: null,
+            document_name: 'sample.pdf',
+            page_number: 2,
+            excerpt: 'The measured efficiency gain was 37 percent.',
+            retrieval_score: 0.91,
+            ordinal: 1,
+          },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByText('Sources (1)')).toBeInTheDocument();
+  expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  expect(screen.getByText('Source deleted')).toBeInTheDocument();
+  expect(screen.getByText('The measured efficiency gain was 37 percent.')).toBeInTheDocument();
+  expect(screen.getByLabelText('sample.pdf page 2 (source deleted)')).toBeInTheDocument();
+});
+
 test('citation sources are collapsed by default', () => {
   renderApp(
     <MessageBubble

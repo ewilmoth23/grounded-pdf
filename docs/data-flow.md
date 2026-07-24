@@ -107,11 +107,14 @@ flowchart TD
   Tombstone --> Vector["Delete vectors by trusted document_id"]
   Vector --> File["Delete validated UUID storage path"]
   File --> Database["Delete document row"]
-  Database --> Cascade["Cascade pages, chunks, jobs, selections, citations"]
-  Cascade --> Commit["Commit and acknowledge"]
+  Database --> Cascade["Cascade pages, chunks, jobs, selections"]
+  Cascade --> Snapshot["Citations keep name, page, excerpt; document link set NULL"]
+  Snapshot --> Commit["Commit and acknowledge"]
 ```
 
 The durable tombstone is committed before external cleanup. If vector, file, or final relational
 cleanup fails, the API keeps the tombstone with a retry message instead of claiming complete deletion.
 Deletion is rejected while ingestion is queued or processing so a worker cannot recreate vectors
-after cleanup.
+after cleanup. Citation rows are the one deliberate survivor: their document link is set to NULL
+while the snapshot columns keep historical answers renderable, and the client shows a
+non-clickable "source deleted" card in place of the page link.

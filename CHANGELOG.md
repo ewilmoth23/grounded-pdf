@@ -5,7 +5,30 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- `GET /documents`, `GET /conversations`, and `GET /conversations/{id}/messages` accept `limit`
+  (default 100, maximum 500) and `offset` query parameters, return a deterministic order with a
+  stable tiebreaker, and report the total row count in an `X-Total-Count` response header. The
+  response body stays a plain array, so existing clients are unaffected.
+- Citation snapshots survive document deletion (migration 0004): `citations.document_id` is now
+  nullable with `ON DELETE SET NULL`, so deleting a document severs the link while the stored
+  document name, page number, and excerpt keep historical answers renderable. Source cards for
+  deleted documents render as non-clickable snapshots with a "Source deleted" note.
+- Model providers reuse one shared HTTP client per provider configuration instead of opening a new
+  connection pool for every request or health check; the clients are closed on application
+  shutdown. Request timeouts are unchanged and still applied per request.
+- Ingestion embeds and upserts chunks in 256-chunk batches, and the OCR path renders pages from the
+  already-open PDF instead of reopening the file once per scanned page.
+- Interactive API docs (`/docs`, `/redoc`) and `/openapi.json` are served only outside the
+  production environment.
+
 ### Fixed
+
+- Failed answer generation no longer leaves an orphaned question: if retrieval fails, the pending
+  user message is rolled back; if generation or persistence fails after the question was saved, a
+  fixed "Answer generation failed. Ask again to retry." assistant placeholder is recorded so the
+  conversation history stays complete. Cancelled streams are unchanged.
 
 - Oversized chunked uploads now return the intended `413 upload_batch_too_large` response through
   the full production middleware stack instead of a 500.

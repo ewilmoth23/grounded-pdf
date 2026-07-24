@@ -8,6 +8,9 @@ from app.services.vector_store import VectorMatch
 INSUFFICIENT_EVIDENCE = (
     "I couldn't find enough evidence in the selected documents to answer that question."
 )
+# Persisted as the assistant answer when generation fails after the question was
+# saved, so the conversation never shows an unanswered question.
+GENERATION_FAILED_MESSAGE = "Answer generation failed. Ask again to retry."
 CITATION_MARKER_RE = re.compile(r"\[[^\]\n]{1,255},\s*p\.\s*[0-9]+\]", re.IGNORECASE)
 PARENTHETICAL_CITATION_RE = re.compile(r"\([^()\n]{1,255},\s*p\.\s*[0-9]+\)", re.IGNORECASE)
 NUMERIC_REFERENCE_RE = re.compile(r"\[(?:[0-9]{1,3}|source\s+[0-9]{1,3})\]", re.IGNORECASE)

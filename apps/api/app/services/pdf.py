@@ -41,16 +41,20 @@ class ExtractedDocument:
 
 
 class OcrExtractor(Protocol):
-    def extract(self, document_path: Path, page_number: int) -> str: ...
+    def extract(self, document: fitz.Document, page_number: int) -> str: ...
 
 
 class TesseractOcrExtractor:
-    """Render one PDF page and extract its text with an optional local Tesseract install."""
+    """Render one page of an already-open PDF and extract its text with local Tesseract.
+
+    The caller passes the open ``fitz.Document`` so extraction does not reopen
+    the file once per scanned page.
+    """
 
     def __init__(self, scale: float = 2.0) -> None:
         self.scale = scale
 
-    def extract(self, document_path: Path, page_number: int) -> str:
+    def extract(self, document: fitz.Document, page_number: int) -> str:
         try:
             import pytesseract
             from PIL import Image
@@ -61,13 +65,12 @@ class TesseractOcrExtractor:
             ) from exc
 
         try:
-            with fitz.open(document_path) as document:
-                page = document.load_page(page_number - 1)
-                pixmap = page.get_pixmap(
-                    matrix=fitz.Matrix(self.scale, self.scale),
-                    colorspace=fitz.csRGB,
-                    alpha=False,
-                )
+            page = document.load_page(page_number - 1)
+            pixmap = page.get_pixmap(
+                matrix=fitz.Matrix(self.scale, self.scale),
+                colorspace=fitz.csRGB,
+                alpha=False,
+            )
             image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
             try:
                 return str(pytesseract.image_to_string(image))
@@ -159,7 +162,7 @@ def extract_pdf(
                 normalized = normalize_text(raw_text)
                 method = "pymupdf"
                 if len(normalized) < MIN_SEARCHABLE_CHARACTERS and enable_ocr and ocr:
-                    ocr_text = ocr.extract(path, index + 1)
+                    ocr_text = ocr.extract(document, index + 1)
                     if len(normalize_text(ocr_text)) > len(normalized):
                         raw_text = ocr_text
                         normalized = normalize_text(ocr_text)

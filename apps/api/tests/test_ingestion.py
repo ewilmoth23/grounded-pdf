@@ -174,7 +174,7 @@ def test_image_only_document_preserves_unsearchable_page_metadata(
     assert vectors.records == {}
 
 
-def test_deletion_removes_file_database_rows_and_vectors(
+def test_deletion_preserves_citation_snapshots_without_document_link(
     db: Session, settings: Settings, sample_pdf: Path
 ) -> None:
     document = add_document(db, settings, sample_pdf)
@@ -215,8 +215,16 @@ def test_deletion_removes_file_database_rows_and_vectors(
     assert db.scalar(select(func.count(DocumentChunk.id))) == 0
     assert db.scalar(select(func.count(ProcessingJob.id))) == 0
     assert db.scalar(select(func.count(ConversationDocument.document_id))) == 0
-    assert db.scalar(select(func.count(Citation.id))) == 0
     assert db.scalar(select(func.count(Message.id))) == 1
+    # The citation row survives as a snapshot: the document link is severed
+    # (SET NULL) while name, page, and excerpt keep the answer renderable.
+    db.expire_all()
+    surviving = db.scalar(select(Citation))
+    assert surviving is not None
+    assert surviving.document_id is None
+    assert surviving.document_name == "sample.pdf"
+    assert surviving.page_number == 2
+    assert surviving.excerpt == "Evidence"
 
 
 def test_failed_deletion_leaves_retryable_tombstone(

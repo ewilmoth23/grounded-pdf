@@ -16,6 +16,18 @@ class OpenAICompatibleProvider:
     ) -> None:
         self.settings = settings
         self.transport = transport
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Lazily create one shared connection-pooling client per provider instance."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(headers=self.headers, transport=self.transport)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     @property
     def headers(self) -> dict[str, str]:
@@ -35,18 +47,13 @@ class OpenAICompatibleProvider:
             ],
         }
         try:
-            async with (
-                httpx.AsyncClient(
-                    timeout=httpx.Timeout(self.settings.model_timeout_seconds),
-                    headers=self.headers,
-                    transport=self.transport,
-                ) as client,
-                client.stream(
-                    "POST",
-                    f"{self.settings.openai_base_url.rstrip('/')}/chat/completions",
-                    json=payload,
-                ) as response,
-            ):
+            client = self._get_client()
+            async with client.stream(
+                "POST",
+                f"{self.settings.openai_base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                timeout=httpx.Timeout(self.settings.model_timeout_seconds),
+            ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line:
@@ -99,11 +106,11 @@ class OpenAICompatibleProvider:
 
     async def health(self) -> tuple[bool, str | None]:
         try:
-            async with httpx.AsyncClient(
-                timeout=HEALTH_CHECK_TIMEOUT_SECONDS, headers=self.headers, transport=self.transport
-            ) as client:
-                response = await client.get(f"{self.settings.openai_base_url.rstrip('/')}/models")
-                response.raise_for_status()
+            response = await self._get_client().get(
+                f"{self.settings.openai_base_url.rstrip('/')}/models",
+                timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
                 return False, "The OpenAI-compatible endpoint returned an invalid model list"

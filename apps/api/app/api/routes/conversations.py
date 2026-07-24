@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
 
@@ -23,8 +23,8 @@ from app.models.entities import (
     utc_now,
 )
 from app.providers.factory import create_chat_provider
-from app.rag.chat import ChatService, CompareSection
-from app.rag.grounding import StreamingCitationFilter
+from app.rag.chat import COMPARE_MODE, ChatService, CompareSection
+from app.rag.grounding import GENERATION_FAILED_MESSAGE, StreamingCitationFilter
 from app.rag.retrieval import Retriever
 from app.rag.verification import VerificationResult, verify_message
 from app.schemas.common import DeleteResponse
@@ -78,6 +78,32 @@ def make_chat_service(db: Session, base: Settings) -> ChatService:
     return ChatService(runtime, retriever, create_chat_provider(runtime))
 
 
+def persist_generation_failure(db: Session, conversation_id: str, mode: str | None) -> None:
+    """Best-effort: record a fixed failed-answer placeholder in its own commit.
+
+    Called from generation error paths after the user message was committed, so
+    the conversation never shows an unanswered question. Never raises: the
+    original generation error must stay the reported failure.
+    """
+    try:
+        db.rollback()
+        db.add(
+            Message(
+                conversation_id=conversation_id,
+                role=MessageRole.ASSISTANT,
+                content=GENERATION_FAILED_MESSAGE,
+                mode=mode,
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "generation_failure_placeholder_not_persisted",
+            extra={"conversation_id": conversation_id},
+        )
+
+
 def set_documents(db: Session, conversation: Conversation, document_ids: list[str]) -> None:
     unique_ids = list(dict.fromkeys(document_ids))
     existing_ids = set(
@@ -111,11 +137,20 @@ def create_conversation(
 
 
 @router.get("", response_model=list[ConversationResponse])
-def list_conversations(db: Session = Depends(get_db)) -> list[ConversationResponse]:
+def list_conversations(
+    response: Response,
+    db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[ConversationResponse]:
+    total = db.scalar(select(func.count(Conversation.id))) or 0
+    response.headers["X-Total-Count"] = str(total)
     conversations = db.scalars(
         select(Conversation)
         .options(selectinload(Conversation.document_links))
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return [to_response(conversation) for conversation in conversations]
 
@@ -173,14 +208,30 @@ def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> 
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
-def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[Message]:
-    require_conversation(db, conversation_id)
+def list_messages(
+    conversation_id: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[Message]:
+    if db.scalar(select(Conversation.id).where(Conversation.id == conversation_id)) is None:
+        raise GroundedPdfError(
+            "Conversation not found", code="conversation_not_found", status_code=404
+        )
+    total = (
+        db.scalar(select(func.count(Message.id)).where(Message.conversation_id == conversation_id))
+        or 0
+    )
+    response.headers["X-Total-Count"] = str(total)
     return list(
         db.scalars(
             select(Message)
             .options(selectinload(Message.citations))
             .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
+            .order_by(Message.created_at, Message.id)
+            .limit(limit)
+            .offset(offset)
         )
     )
 
@@ -281,23 +332,35 @@ async def submit_question(
     base: Settings = Depends(get_settings),
 ) -> AnswerResponse:
     service = make_chat_service(db, base)
+    mode = COMPARE_MODE if payload.mode == "compare" else None
+    # Retrieval failures roll the question back inside prepare(); nothing is
+    # persisted at that point, so there is no orphan to repair.
     if payload.mode == "compare":
         user_message, sections = await run_in_threadpool(
             service.prepare_compare, db, conversation_id, payload.question
-        )
-        async for _token in service.compare_events(sections):
-            pass  # Sections accumulate their finalized text while streaming.
-        assistant = await run_in_threadpool(
-            service.persist_compare_answer, db, conversation_id, sections
         )
     else:
         user_message, citations, prompt = await run_in_threadpool(
             service.prepare, db, conversation_id, payload.question
         )
-        parts = [token async for token in service.tokens(prompt)]
-        assistant = await run_in_threadpool(
-            service.persist_answer, db, conversation_id, "".join(parts), citations
-        )
+    try:
+        if payload.mode == "compare":
+            async for _token in service.compare_events(sections):
+                pass  # Sections accumulate their finalized text while streaming.
+            assistant = await run_in_threadpool(
+                service.persist_compare_answer, db, conversation_id, sections
+            )
+        else:
+            parts = [token async for token in service.tokens(prompt)]
+            assistant = await run_in_threadpool(
+                service.persist_answer, db, conversation_id, "".join(parts), citations
+            )
+    except asyncio.CancelledError:
+        db.rollback()
+        raise
+    except Exception:
+        await run_in_threadpool(persist_generation_failure, db, conversation_id, mode)
+        raise
     return AnswerResponse(
         user_message=MessageResponse.model_validate(user_message),
         assistant_message=MessageResponse.model_validate(assistant),
@@ -371,14 +434,20 @@ async def stream_question(
             done = MessageResponse.model_validate(assistant).model_dump(mode="json")
             yield f"event: done\ndata: {json.dumps(done)}\n\n"
         except asyncio.CancelledError:
+            # A client disconnect or stop request is not a generation failure;
+            # no placeholder answer is recorded.
             db.rollback()
             raise
         except GroundedPdfError as exc:
-            db.rollback()
+            await run_in_threadpool(
+                persist_generation_failure, db, conversation_id, user_message.mode
+            )
             error = {"code": exc.code, "message": exc.message, "status": exc.status_code}
             yield f"event: error\ndata: {json.dumps(error)}\n\n"
         except Exception:
-            db.rollback()
+            await run_in_threadpool(
+                persist_generation_failure, db, conversation_id, user_message.mode
+            )
             logger.exception("streaming_answer_failed", extra={"conversation_id": conversation_id})
             error = {
                 "code": "internal_error",
