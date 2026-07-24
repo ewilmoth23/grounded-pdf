@@ -38,6 +38,11 @@ data/
 sample_documents/*.pdf
 *.gguf
 *.safetensors
-uploads/
-models/
-huggingface/
+# Anchored to the repository root so application packages such as
+# apps/api/app/models are never excluded by accident.
+/uploads/
+/models/
+/huggingface/
+data/uploads/
+data/models/
+data/huggingface/

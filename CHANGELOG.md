@@ -186,4 +186,3 @@ Initial public portfolio release.
   template, security reporting policy, code of conduct, and production readiness self-audit results.
 
 [0.2.0]: https://github.com/ewilmoth23/grounded-pdf/releases/tag/v0.2.0
-[0.1.0]: https://github.com/ewilmoth23/grounded-pdf/releases/tag/v0.1.0
