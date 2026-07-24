@@ -9,6 +9,7 @@ import { ErrorAlert, EmptyState } from '../components/Feedback';
 import { Skeleton } from '../components/Skeleton';
 import { ConversationNav } from '../features/chat/ConversationNav';
 import { DocumentPicker } from '../features/chat/DocumentPicker';
+import { ExportMenu } from '../features/chat/ExportMenu';
 import { MessageBubble } from '../features/chat/MessageBubble';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import type { Citation, Conversation, Message, QuestionMode } from '../types/api';
@@ -382,12 +383,18 @@ export function ChatPage() {
             </div>
           </div>
           {conversationId && (
-            <DocumentPicker
-              documents={documents.data ?? []}
-              selected={detail.data?.document_ids ?? []}
-              onChange={(ids) => selectDocuments.mutate(ids)}
-              disabled={streaming}
-            />
+            <div className="flex shrink-0 items-center gap-1.5">
+              <ExportMenu
+                conversationId={conversationId}
+                disabled={streaming || messages.length === 0}
+              />
+              <DocumentPicker
+                documents={documents.data ?? []}
+                selected={detail.data?.document_ids ?? []}
+                onChange={(ids) => selectDocuments.mutate(ids)}
+                disabled={streaming}
+              />
+            </div>
           )}
         </header>
 

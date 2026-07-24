@@ -108,6 +108,8 @@ export const api = {
       request<{ deleted: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     verify: (id: string, messageId: string) =>
       request<Verification>(`/conversations/${id}/messages/${messageId}/verify`),
+    exportUrl: (id: string, format: 'markdown' | 'html') =>
+      `${API_BASE}/conversations/${id}/export?format=${format}`,
   },
   search: {
     query: (q: string, documentIds: string[] = []) => {

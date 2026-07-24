@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { vi } from 'vitest';
 import { ChatPage } from '../src/pages/ChatPage';
-import type { DocumentRecord } from '../src/types/api';
+import type { DocumentRecord, Message } from '../src/types/api';
 import { jsonResponse, renderApp } from './helpers';
 
 function documentRecord(id: string, status: DocumentRecord['status'] = 'ready'): DocumentRecord {
@@ -21,7 +21,11 @@ function documentRecord(id: string, status: DocumentRecord['status'] = 'ready'):
   };
 }
 
-function mockConversationFetch(documents: DocumentRecord[], selectedIds: string[]) {
+function mockConversationFetch(
+  documents: DocumentRecord[],
+  selectedIds: string[],
+  messages: Message[] = [],
+) {
   const conversation = {
     id: 'c1',
     title: 'Research',
@@ -33,12 +37,33 @@ function mockConversationFetch(documents: DocumentRecord[], selectedIds: string[
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.endsWith('/documents')) return Promise.resolve(jsonResponse(documents));
     if (url.endsWith('/conversations/c1')) {
-      return Promise.resolve(jsonResponse({ ...conversation, messages: [] }));
+      return Promise.resolve(jsonResponse({ ...conversation, messages }));
     }
     if (url.endsWith('/conversations')) return Promise.resolve(jsonResponse([conversation]));
     return Promise.resolve(jsonResponse([]));
   });
   vi.stubGlobal('fetch', fetchMock);
+}
+
+function savedExchange(): Message[] {
+  return [
+    {
+      id: 'm1',
+      role: 'user',
+      content: 'What was the result?',
+      mode: null,
+      citations: [],
+      created_at: '2026-01-01T00:01:00Z',
+    },
+    {
+      id: 'm2',
+      role: 'assistant',
+      content: 'The result was 37 percent [ready-1.pdf, p. 2].',
+      mode: null,
+      citations: [],
+      created_at: '2026-01-01T00:02:00Z',
+    },
+  ];
 }
 
 function renderChatRoute() {
@@ -71,6 +96,37 @@ test('shows conversation creation failures without requiring an active conversat
   await userEvent.click(createButtons.at(-1)!);
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Could not create conversation');
+});
+
+test('export menu is disabled while the conversation has no saved messages', async () => {
+  mockConversationFetch([documentRecord('ready-1')], ['ready-1']);
+  renderChatRoute();
+
+  const exportButton = await screen.findByRole('button', { name: 'Export conversation' });
+  expect(exportButton).toBeDisabled();
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+});
+
+test('export menu offers markdown and html downloads of the saved conversation', async () => {
+  mockConversationFetch([documentRecord('ready-1')], ['ready-1'], savedExchange());
+  renderChatRoute();
+
+  await screen.findByText('What was the result?');
+  const exportButton = await screen.findByRole('button', { name: 'Export conversation' });
+  expect(exportButton).toBeEnabled();
+  expect(exportButton).toHaveAttribute('aria-expanded', 'false');
+
+  await userEvent.click(exportButton);
+
+  expect(exportButton).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('menuitem', { name: 'Markdown (.md)' })).toHaveAttribute(
+    'href',
+    expect.stringContaining('/conversations/c1/export?format=markdown'),
+  );
+  expect(screen.getByRole('menuitem', { name: 'HTML (.html)' })).toHaveAttribute(
+    'href',
+    expect.stringContaining('/conversations/c1/export?format=html'),
+  );
 });
 
 test('compare toggle is disabled until two ready documents are selected', async () => {

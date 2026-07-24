@@ -24,6 +24,13 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Added
 
+- Grounded export: `GET /conversations/{id}/export?format=markdown|html` downloads a conversation
+  as Markdown or a self-contained HTML file (inline CSS, no scripts, all content escaped) with the
+  questions, answers, numbered citations (marker, document, page, excerpt), a per-answer
+  "Verification: N of M claims supported" summary, and a generation-settings footer. The export is
+  rendered server-side from persisted records only; if verification infrastructure is unavailable
+  the file notes that instead of failing. The chat header gains an Export menu, disabled while
+  streaming or before the first saved message.
 - Cross-document compare mode: a composer toggle asks one question across two to four selected
   documents. Retrieval runs separately per document, each section streams through its own citation
   filter with only that document's markers, and a document without admissible evidence gets the

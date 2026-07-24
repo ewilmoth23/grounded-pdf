@@ -5,7 +5,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -42,6 +42,7 @@ from app.schemas.conversations import (
     VerificationSourceResponse,
 )
 from app.services.dependencies import get_embedding_provider, get_vector_store
+from app.services.export import ConversationExport, ExportFormat, build_export
 from app.services.settings import effective_settings
 
 router = APIRouter()
@@ -232,6 +233,43 @@ async def verify_answer(
             )
             for sentence in result.sentences
         ],
+    )
+
+
+@router.get("/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: str,
+    export_format: ExportFormat = Query("markdown", alias="format"),
+    db: Session = Depends(get_db),
+    base: Settings = Depends(get_settings),
+) -> Response:
+    """Download the conversation as Markdown or self-contained HTML.
+
+    The export is rendered entirely from persisted records (messages in creation
+    order, citation rows, runtime settings, and recomputed verification
+    summaries); browser state is never the source.
+    """
+
+    def run() -> ConversationExport:
+        conversation = db.scalar(
+            select(Conversation)
+            .options(selectinload(Conversation.messages).selectinload(Message.citations))
+            .where(Conversation.id == conversation_id)
+        )
+        if conversation is None:
+            raise GroundedPdfError(
+                "Conversation not found", code="conversation_not_found", status_code=404
+            )
+        runtime = effective_settings(db, base)
+        return build_export(
+            db, runtime, get_embedding_provider(), get_vector_store(), conversation, export_format
+        )
+
+    export = await run_in_threadpool(run)
+    return Response(
+        content=export.content,
+        media_type=export.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{export.filename}"'},
     )
 
 

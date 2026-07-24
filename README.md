@@ -52,6 +52,9 @@ document content or fabricated interface is shown._
 - Cross-document compare mode: ask one question across two to four selected documents and get a
   per-document answer, each grounded only in that document's own evidence and citations; a
   document without evidence says so instead of borrowing from the others
+- Grounded export: download any conversation as Markdown or a self-contained HTML file with
+  questions, answers, numbered page-level sources, per-answer verification summaries, and the
+  generation settings — rendered server-side from saved records, never from browser state
 - Conversation history, document selection, retryable processing, and complete deletion
 - Responsive React interface, safe Markdown rendering, dark mode, and a PDF.js page viewer
 - Deterministic test provider and synthetic PDF; automated tests do not require model access
@@ -274,7 +277,6 @@ sample_documents/  Synthetic sample specification and generated local PDF target
 
 1. Add configuration fingerprints and safe bulk re-indexing after embedding/chunk changes.
 2. Add OCR language selection, preprocessing controls, and Docker OCR documentation.
-3. Export conversations with stable page links and source metadata.
 
 Accounts, cloud sync, web search, autonomous agents, billing, and Kubernetes are intentionally outside
 the first release.

@@ -85,6 +85,10 @@ flowchart LR
 The model can repeat a supplied marker, but it cannot create the citation object's document ID, file
 URL, page target, excerpt, score, or ordinal. Those values come from the retrieval record.
 
+Conversation exports follow the same boundary: the Markdown/HTML export endpoint renders entirely
+from persisted records (messages in creation order, citation rows, runtime settings, and recomputed
+verification summaries) — browser state is never the source of an exported file.
+
 When a source card opens the viewer, the citation's excerpt travels with the navigation (router
 state, with a truncated `highlight` search parameter as a fallback). The viewer normalizes the
 excerpt and the PDF.js text-layer strings (case, whitespace, ligatures, end-of-line hyphenation),
