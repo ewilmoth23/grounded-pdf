@@ -1,5 +1,5 @@
 import { API_BASE, ApiError, toApiError } from './client';
-import type { Citation, Message } from '../types/api';
+import type { Citation, Message, QuestionMode } from '../types/api';
 
 interface StreamHandlers {
   onMetadata: (payload: { user_message: Message; citations: Citation[] }) => void;
@@ -31,11 +31,12 @@ export async function streamQuestion(
   question: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  mode: QuestionMode = 'answer',
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, mode }),
     signal,
   });
   if (!response.ok || !response.body) {

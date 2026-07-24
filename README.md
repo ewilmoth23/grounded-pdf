@@ -49,6 +49,9 @@ document content or fabricated interface is shown._
 - Instant semantic quote search: a Search view in the navigation (⌘K / Ctrl+K) embeds your query
   locally and returns exact stored passages with document, page, and match strength — no model
   call, with deep links into the highlighted viewer
+- Cross-document compare mode: ask one question across two to four selected documents and get a
+  per-document answer, each grounded only in that document's own evidence and citations; a
+  document without evidence says so instead of borrowing from the others
 - Conversation history, document selection, retryable processing, and complete deletion
 - Responsive React interface, safe Markdown rendering, dark mode, and a PDF.js page viewer
 - Deterministic test provider and synthetic PDF; automated tests do not require model access

@@ -23,7 +23,7 @@ from app.models.entities import (
     utc_now,
 )
 from app.providers.factory import create_chat_provider
-from app.rag.chat import ChatService
+from app.rag.chat import ChatService, CompareSection
 from app.rag.grounding import StreamingCitationFilter
 from app.rag.retrieval import Retriever
 from app.rag.verification import VerificationResult, verify_message
@@ -243,13 +243,23 @@ async def submit_question(
     base: Settings = Depends(get_settings),
 ) -> AnswerResponse:
     service = make_chat_service(db, base)
-    user_message, citations, prompt = await run_in_threadpool(
-        service.prepare, db, conversation_id, payload.question
-    )
-    parts = [token async for token in service.tokens(prompt)]
-    assistant = await run_in_threadpool(
-        service.persist_answer, db, conversation_id, "".join(parts), citations
-    )
+    if payload.mode == "compare":
+        user_message, sections = await run_in_threadpool(
+            service.prepare_compare, db, conversation_id, payload.question
+        )
+        async for _token in service.compare_events(sections):
+            pass  # Sections accumulate their finalized text while streaming.
+        assistant = await run_in_threadpool(
+            service.persist_compare_answer, db, conversation_id, sections
+        )
+    else:
+        user_message, citations, prompt = await run_in_threadpool(
+            service.prepare, db, conversation_id, payload.question
+        )
+        parts = [token async for token in service.tokens(prompt)]
+        assistant = await run_in_threadpool(
+            service.persist_answer, db, conversation_id, "".join(parts), citations
+        )
     return AnswerResponse(
         user_message=MessageResponse.model_validate(user_message),
         assistant_message=MessageResponse.model_validate(assistant),
@@ -264,9 +274,17 @@ async def stream_question(
     base: Settings = Depends(get_settings),
 ) -> StreamingResponse:
     service = make_chat_service(db, base)
-    user_message, citations, prompt = await run_in_threadpool(
-        service.prepare, db, conversation_id, payload.question
-    )
+    sections: list[CompareSection] = []
+    if payload.mode == "compare":
+        user_message, sections = await run_in_threadpool(
+            service.prepare_compare, db, conversation_id, payload.question
+        )
+        citations = [citation for section in sections for citation in section.citations]
+        prompt = None
+    else:
+        user_message, citations, prompt = await run_in_threadpool(
+            service.prepare, db, conversation_id, payload.question
+        )
 
     async def events() -> AsyncIterator[str]:
         metadata = {
@@ -285,26 +303,33 @@ async def stream_question(
             ],
         }
         yield f"event: metadata\ndata: {json.dumps(metadata)}\n\n"
-        answer = ""
-        citation_filter = StreamingCitationFilter(citations)
         try:
-            async for token in service.tokens(prompt):
-                safe_token = citation_filter.feed(token)
-                if safe_token:
-                    answer += safe_token
+            if payload.mode == "compare":
+                async for safe_token in service.compare_events(sections):
                     yield f"event: token\ndata: {json.dumps({'token': safe_token})}\n\n"
-            trailing_text = citation_filter.finish()
-            if trailing_text:
-                answer += trailing_text
-                yield f"event: token\ndata: {json.dumps({'token': trailing_text})}\n\n"
-            cited_answer = service.finalize_answer(answer, citations)
-            if cited_answer != answer and cited_answer.startswith(answer):
-                suffix = cited_answer[len(answer) :]
-                yield f"event: token\ndata: {json.dumps({'token': suffix})}\n\n"
-            answer = cited_answer
-            assistant = await run_in_threadpool(
-                service.persist_answer, db, conversation_id, answer, citations
-            )
+                assistant = await run_in_threadpool(
+                    service.persist_compare_answer, db, conversation_id, sections
+                )
+            else:
+                answer = ""
+                citation_filter = StreamingCitationFilter(citations)
+                async for token in service.tokens(prompt):
+                    safe_token = citation_filter.feed(token)
+                    if safe_token:
+                        answer += safe_token
+                        yield f"event: token\ndata: {json.dumps({'token': safe_token})}\n\n"
+                trailing_text = citation_filter.finish()
+                if trailing_text:
+                    answer += trailing_text
+                    yield f"event: token\ndata: {json.dumps({'token': trailing_text})}\n\n"
+                cited_answer = service.finalize_answer(answer, citations)
+                if cited_answer != answer and cited_answer.startswith(answer):
+                    suffix = cited_answer[len(answer) :]
+                    yield f"event: token\ndata: {json.dumps({'token': suffix})}\n\n"
+                answer = cited_answer
+                assistant = await run_in_threadpool(
+                    service.persist_answer, db, conversation_id, answer, citations
+                )
             done = MessageResponse.model_validate(assistant).model_dump(mode="json")
             yield f"event: done\ndata: {json.dumps(done)}\n\n"
         except asyncio.CancelledError:

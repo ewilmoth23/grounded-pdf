@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, MessageSquareText, PanelLeft, Square } from 'lucide-react';
+import { ArrowDown, ArrowUp, Columns2, MessageSquareText, PanelLeft, Square } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api } from '../api/client';
@@ -11,13 +11,18 @@ import { ConversationNav } from '../features/chat/ConversationNav';
 import { DocumentPicker } from '../features/chat/DocumentPicker';
 import { MessageBubble } from '../features/chat/MessageBubble';
 import { useModalBehavior } from '../hooks/useModalBehavior';
-import type { Citation, Conversation, Message } from '../types/api';
+import type { Citation, Conversation, Message, QuestionMode } from '../types/api';
 
 const DEFAULT_TITLE = 'New conversation';
 const SUGGESTED_PROMPTS = [
   'Summarize the key findings',
   'What methodology was used?',
   'What are the stated limitations?',
+];
+const COMPARE_PROMPTS = [
+  'Compare the methodologies',
+  'Where do these documents disagree?',
+  "Summarize each document's conclusions",
 ];
 
 function deriveTitle(question: string, maxLength = 48): string {
@@ -33,6 +38,7 @@ export function ChatPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [question, setQuestion] = useState('');
+  const [mode, setMode] = useState<QuestionMode>('answer');
   const [streaming, setStreaming] = useState(false);
   const [streamMessages, setStreamMessages] = useState<Message[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +123,21 @@ export function ChatPage() {
     [streamMessages, detail.data?.messages],
   );
 
+  const selectedDocumentIds = detail.data?.document_ids;
+  const readySelectedCount = useMemo(
+    () =>
+      (selectedDocumentIds ?? []).filter((id) =>
+        documents.data?.some((doc) => doc.id === id && doc.status === 'ready'),
+      ).length,
+    [selectedDocumentIds, documents.data],
+  );
+  const compareAvailable = readySelectedCount >= 2;
+
+  // Compare needs two ready documents; fall back when the selection shrinks.
+  useEffect(() => {
+    if (!compareAvailable) setMode('answer');
+  }, [compareAvailable]);
+
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -156,6 +177,10 @@ export function ChatPage() {
     if (!conversationId || !value || streaming) return;
     if (!detail.data?.document_ids.length) {
       setError('Select at least one processed document before asking a question.');
+      return;
+    }
+    if (mode === 'compare' && !compareAvailable) {
+      setError('Compare mode needs at least two ready documents selected.');
       return;
     }
     setQuestion('');
@@ -224,6 +249,7 @@ export function ChatPage() {
                 id: 'streaming',
                 role: 'assistant',
                 content: '',
+                mode: mode === 'compare' ? 'compare' : null,
                 citations,
                 created_at: new Date().toISOString(),
               },
@@ -245,6 +271,7 @@ export function ChatPage() {
           },
         },
         controller.signal,
+        mode,
       );
       await queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] });
       await queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -435,16 +462,18 @@ export function ChatPage() {
                       />
                       {hasSelectedDocuments && (
                         <div className="flex flex-wrap justify-center gap-2">
-                          {SUGGESTED_PROMPTS.map((prompt) => (
-                            <button
-                              key={prompt}
-                              type="button"
-                              className="rounded-full border bg-white px-4 py-2 text-sm text-ink-600 transition-all duration-150 hover:-translate-y-px hover:border-accent-400 hover:text-ink-950 hover:shadow dark:bg-ink-900 dark:text-ink-300 dark:hover:text-white"
-                              onClick={() => fillPrompt(prompt)}
-                            >
-                              {prompt}
-                            </button>
-                          ))}
+                          {(mode === 'compare' ? COMPARE_PROMPTS : SUGGESTED_PROMPTS).map(
+                            (prompt) => (
+                              <button
+                                key={prompt}
+                                type="button"
+                                className="rounded-full border bg-white px-4 py-2 text-sm text-ink-600 transition-all duration-150 hover:-translate-y-px hover:border-accent-400 hover:text-ink-950 hover:shadow dark:bg-ink-900 dark:text-ink-300 dark:hover:text-white"
+                                onClick={() => fillPrompt(prompt)}
+                              >
+                                {prompt}
+                              </button>
+                            ),
+                          )}
                         </div>
                       )}
                     </>
@@ -472,6 +501,50 @@ export function ChatPage() {
             </div>
             <div className="border-t bg-white p-3 dark:bg-ink-900 sm:p-4">
               <div className="mx-auto max-w-4xl">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <div
+                    role="group"
+                    aria-label="Question mode"
+                    className="inline-flex rounded-lg border bg-ink-50 p-0.5 dark:bg-ink-950"
+                  >
+                    <button
+                      type="button"
+                      className={`inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 ${
+                        mode === 'answer'
+                          ? 'bg-white text-ink-950 shadow-sm dark:bg-ink-800 dark:text-white'
+                          : 'text-ink-600 hover:text-ink-950 dark:text-ink-300 dark:hover:text-white'
+                      }`}
+                      aria-pressed={mode === 'answer'}
+                      onClick={() => setMode('answer')}
+                      disabled={streaming}
+                    >
+                      <MessageSquareText className="size-4" aria-hidden="true" /> Answer
+                    </button>
+                    <button
+                      type="button"
+                      className={`inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
+                        mode === 'compare'
+                          ? 'bg-white text-ink-950 shadow-sm dark:bg-ink-800 dark:text-white'
+                          : 'text-ink-600 hover:text-ink-950 dark:text-ink-300 dark:hover:text-white'
+                      }`}
+                      aria-pressed={mode === 'compare'}
+                      onClick={() => setMode('compare')}
+                      disabled={streaming || !compareAvailable}
+                      title={
+                        compareAvailable
+                          ? undefined
+                          : 'Select at least two ready documents to compare.'
+                      }
+                    >
+                      <Columns2 className="size-4" aria-hidden="true" /> Compare docs
+                    </button>
+                  </div>
+                  {mode === 'compare' && (
+                    <p className="text-xs text-ink-500 dark:text-ink-400">
+                      One answer per document, each grounded only in that document.
+                    </p>
+                  )}
+                </div>
                 <form onSubmit={(event) => void send(event)} className="relative">
                   <label htmlFor="question" className="sr-only">
                     Ask a question
@@ -491,7 +564,11 @@ export function ChatPage() {
                         event.currentTarget.form?.requestSubmit();
                       }
                     }}
-                    placeholder="Ask a question about the selected documents…"
+                    placeholder={
+                      mode === 'compare'
+                        ? 'Ask one question to answer from each selected document…'
+                        : 'Ask a question about the selected documents…'
+                    }
                     maxLength={4000}
                     rows={2}
                   />

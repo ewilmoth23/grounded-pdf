@@ -281,6 +281,58 @@ test('deleting is requested through the provided handler', async () => {
   expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'conversation-1' }));
 });
 
+test('compare answers render per-document section panels in a responsive grid', () => {
+  renderApp(
+    <MessageBubble
+      message={{
+        id: 'message-1',
+        role: 'assistant',
+        mode: 'compare',
+        content:
+          '## alpha.pdf\n\nThe gain was 37 percent. [alpha.pdf, p. 2]\n\n## beta.pdf\n\n' +
+          "I couldn't find enough evidence in the selected documents to answer that question.",
+        created_at: '2026-01-01T00:00:00Z',
+        citations: [
+          {
+            id: 'citation-1',
+            document_id: 'doc-1',
+            document_name: 'alpha.pdf',
+            page_number: 2,
+            excerpt: 'The measured efficiency gain was 37 percent.',
+            retrieval_score: 0.91,
+            ordinal: 1,
+          },
+        ],
+      }}
+    />,
+  );
+  const grid = screen.getByTestId('compare-sections');
+  expect(grid.className).toContain('lg:grid-cols-2');
+  const headings = screen.getAllByRole('heading', { level: 3 });
+  expect(headings.map((heading) => heading.textContent)).toEqual(['alpha.pdf', 'beta.pdf']);
+  expect(screen.getByLabelText('Answer from beta.pdf')).toHaveTextContent(
+    "I couldn't find enough evidence",
+  );
+  // Sources stay shared beneath the sections.
+  expect(screen.getByText('Sources (1)')).toBeInTheDocument();
+});
+
+test('assistant markdown headings without compare mode keep the regular layout', () => {
+  renderApp(
+    <MessageBubble
+      message={{
+        id: 'message-1',
+        role: 'assistant',
+        mode: null,
+        content: '## First\n\nText.\n\n## Second\n\nMore text.',
+        created_at: '2026-01-01T00:00:00Z',
+        citations: [],
+      }}
+    />,
+  );
+  expect(screen.queryByTestId('compare-sections')).not.toBeInTheDocument();
+});
+
 test('streaming answer is visibly marked', () => {
   renderApp(
     <MessageBubble

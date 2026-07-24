@@ -120,6 +120,19 @@ records before returning document, page, excerpt, and score. No chat provider is
 nothing is generated: the response contains only text stored during ingestion, which is why the
 search view can promise exact passages from the user's documents.
 
+### Compare mode
+
+Compare is a per-question mode, not a conversation setting. When a question arrives with
+`mode: "compare"`, the API requires between two and four ready selected documents and then runs the
+normal retrieval and grounding pipeline once per document, scoped to that document alone. Each
+document's section streams through its own citation filter that admits only that document's
+markers, so one document's evidence can never appear under another's heading. A document with no
+admissible evidence gets the fixed insufficient-evidence response in its section and its share of
+the question never reaches the provider. The persisted assistant message is ordinary Markdown — one
+`## document name` heading per section — with the union of per-document citations, and a nullable
+`mode` column on messages records how it was produced so the client can render sections side by
+side. The SSE protocol is unchanged: metadata, tokens, done.
+
 ### Provider abstraction
 
 `ChatProvider` exposes two operations: token streaming and a health check. Ollama and generic OpenAI-

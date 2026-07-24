@@ -12,6 +12,22 @@ function isPersistedId(id: string): boolean {
   return id !== 'streaming' && !id.startsWith('stopped-');
 }
 
+interface CompareSection {
+  title: string;
+  body: string;
+}
+
+/** Split a compare answer into its per-document H2 sections; null below 2 sections. */
+function parseCompareSections(content: string): CompareSection[] | null {
+  const headings = [...content.matchAll(/^## +(.+)$/gm)];
+  if (headings.length < 2) return null;
+  return headings.map((heading, index) => {
+    const start = (heading.index ?? 0) + heading[0].length;
+    const end = index + 1 < headings.length ? headings[index + 1].index : content.length;
+    return { title: heading[1].trim(), body: content.slice(start, end).trim() };
+  });
+}
+
 export const MessageBubble = memo(function MessageBubble({
   message,
   streaming = false,
@@ -22,6 +38,8 @@ export const MessageBubble = memo(function MessageBubble({
   conversationId?: string;
 }) {
   const assistant = message.role === 'assistant';
+  const compareSections =
+    assistant && message.mode === 'compare' ? parseCompareSections(message.content) : null;
   const location = useLocation();
   const verifiable =
     assistant &&
@@ -37,11 +55,42 @@ export const MessageBubble = memo(function MessageBubble({
       <div
         className={`rounded-2xl px-4 py-3 text-sm leading-7 ${
           assistant
-            ? 'max-w-[95%] border bg-white text-ink-800 dark:bg-ink-900 dark:text-ink-100 sm:max-w-[88%]'
+            ? `border bg-white text-ink-800 dark:bg-ink-900 dark:text-ink-100 ${
+                compareSections ? 'w-full max-w-full' : 'max-w-[95%] sm:max-w-[88%]'
+              }`
             : 'max-w-[92%] bg-ink-800 text-white ring-1 ring-transparent dark:bg-ink-800 dark:text-ink-100 dark:ring-white/[0.06] sm:max-w-[82%]'
         }`}
       >
-        {assistant ? (
+        {assistant && compareSections ? (
+          <div className="grid gap-3 lg:grid-cols-2" data-testid="compare-sections">
+            {compareSections.map((section) => (
+              <section
+                key={section.title}
+                className="rounded-xl border bg-ink-50 p-3 dark:bg-ink-950"
+                aria-label={`Answer from ${section.title}`}
+              >
+                <h3 className="mb-2 flex items-center gap-2 border-b pb-2 text-sm font-semibold text-ink-800 dark:text-ink-100">
+                  <FileText
+                    className="size-4 shrink-0 text-accent-700 dark:text-accent-400"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 truncate">{section.title}</span>
+                </h3>
+                <div className="prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+                    {section.body}
+                  </ReactMarkdown>
+                </div>
+              </section>
+            ))}
+            {streaming && (
+              <span
+                className="ml-1 inline-block h-4 w-1 animate-pulse bg-accent-600"
+                aria-label="Answer streaming"
+              />
+            )}
+          </div>
+        ) : assistant ? (
           <div className="prose prose-sm max-w-none dark:prose-invert">
             <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
               {message.content || (streaming ? 'Thinking…' : '')}

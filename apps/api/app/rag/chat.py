@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field, replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -24,6 +25,7 @@ from app.rag.grounding import (
     INSUFFICIENT_EVIDENCE,
     SYSTEM_PROMPT,
     GroundedCitation,
+    StreamingCitationFilter,
     build_citations,
     build_user_prompt,
     ensure_inline_citation,
@@ -33,6 +35,25 @@ from app.rag.retrieval import Retriever
 from app.services.vector_store import VectorMatch
 
 logger = logging.getLogger(__name__)
+
+COMPARE_MODE = "compare"
+COMPARE_DOCUMENT_LIMIT = 4
+
+
+@dataclass
+class CompareSection:
+    """One document's share of a compare answer.
+
+    ``prompt`` is None when retrieval found no admissible evidence for the
+    document; that section gets the fixed refusal without a provider call.
+    ``answer`` is filled with the finalized section text during streaming.
+    """
+
+    document_id: str
+    document_name: str
+    citations: list[GroundedCitation] = field(default_factory=list)
+    prompt: str | None = None
+    answer: str = ""
 
 
 def validate_matches(
@@ -123,6 +144,120 @@ class ChatService:
             build_user_prompt(question, select_cited_matches(matches, citations)),
         )
 
+    def prepare_compare(
+        self, db: Session, conversation_id: str, question: str
+    ) -> tuple[Message, list[CompareSection]]:
+        """Persist the compare question and run retrieval separately per document."""
+        conversation = db.scalar(
+            select(Conversation)
+            .options(selectinload(Conversation.document_links))
+            .where(Conversation.id == conversation_id)
+        )
+        if conversation is None:
+            raise GroundedPdfError(
+                "Conversation not found", code="conversation_not_found", status_code=404
+            )
+        selected_ids = [link.document_id for link in conversation.document_links]
+        ready_by_id = {
+            document.id: document
+            for document in db.scalars(
+                select(Document).where(
+                    Document.id.in_(selected_ids), Document.status == ProcessingStatus.READY
+                )
+            )
+        }
+        # Selection order is not persisted, so order sections deterministically
+        # by display name (tiebreak on id) for stable, user-predictable output.
+        ordered = sorted(
+            (
+                ready_by_id[document_id]
+                for document_id in selected_ids
+                if document_id in ready_by_id
+            ),
+            key=lambda document: ((document.title or document.original_name).lower(), document.id),
+        )
+        if len(ordered) < 2:
+            raise GroundedPdfError(
+                "Compare mode needs at least two ready documents selected.",
+                code="compare_needs_two_documents",
+                status_code=422,
+            )
+        if len(ordered) > COMPARE_DOCUMENT_LIMIT:
+            raise GroundedPdfError(
+                f"Compare mode supports up to {COMPARE_DOCUMENT_LIMIT} documents."
+                " Deselect some documents and retry.",
+                code="compare_too_many_documents",
+                status_code=422,
+            )
+        user_message = Message(
+            conversation_id=conversation_id,
+            role=MessageRole.USER,
+            content=question.strip(),
+            mode=COMPARE_MODE,
+        )
+        db.add(user_message)
+        conversation.updated_at = utc_now()
+        db.commit()
+        db.refresh(user_message)
+        sections: list[CompareSection] = []
+        next_ordinal = 1
+        for document in ordered:
+            matches = self._validated_matches(
+                db, self.retriever.retrieve(question, [document.id]), [document.id]
+            )
+            section = CompareSection(document_id=document.id, document_name=document.original_name)
+            if matches:
+                section.citations = [
+                    replace(citation, ordinal=next_ordinal + index)
+                    for index, citation in enumerate(
+                        build_citations(matches, maximum=self.settings.retrieval_count)
+                    )
+                ]
+                next_ordinal += len(section.citations)
+                section.prompt = build_user_prompt(
+                    question, select_cited_matches(matches, section.citations)
+                )
+            sections.append(section)
+        return user_message, sections
+
+    async def compare_events(self, sections: list[CompareSection]) -> AsyncIterator[str]:
+        """Yield the compare answer as safe tokens, one grounded section per document.
+
+        Each section streams through its own citation filter restricted to that
+        document's markers. Sections without evidence yield the fixed refusal and
+        never reach the provider. The finalized text is stored on each section.
+        """
+        for index, section in enumerate(sections):
+            heading = f"## {section.document_name}\n\n"
+            if index:
+                heading = f"\n\n{heading}"
+            yield heading
+            if section.prompt is None:
+                section.answer = INSUFFICIENT_EVIDENCE
+                yield INSUFFICIENT_EVIDENCE
+                continue
+            answer = ""
+            citation_filter = StreamingCitationFilter(section.citations)
+            async for token in self.tokens(section.prompt):
+                safe_token = citation_filter.feed(token)
+                if safe_token:
+                    answer += safe_token
+                    yield safe_token
+            trailing_text = citation_filter.finish()
+            if trailing_text:
+                answer += trailing_text
+                yield trailing_text
+            finalized = self.finalize_answer(answer, section.citations)
+            if finalized != answer and finalized.startswith(answer):
+                yield finalized[len(answer) :]
+            section.answer = finalized
+
+    @staticmethod
+    def compose_compare_content(sections: list[CompareSection]) -> str:
+        return "\n\n".join(
+            f"## {section.document_name}\n\n{section.answer}" for section in sections
+        )
+
     @staticmethod
     def _validated_matches(
         db: Session, matches: list[VectorMatch], ready_ids: list[str]
@@ -158,10 +293,35 @@ class ChatService:
         citations: list[GroundedCitation],
     ) -> Message:
         final_answer = ChatService.finalize_answer(answer, citations)
+        return ChatService._persist_message(db, conversation_id, final_answer, citations, None)
+
+    @staticmethod
+    def persist_compare_answer(
+        db: Session, conversation_id: str, sections: list[CompareSection]
+    ) -> Message:
+        """Persist the composed per-document sections as one assistant message.
+
+        Sections are already finalized individually (each evidencing section
+        carries its own filtered inline markers), so the composed content is
+        persisted as-is with the union of per-document citations.
+        """
+        citations = [citation for section in sections for citation in section.citations]
+        content = ChatService.compose_compare_content(sections)
+        return ChatService._persist_message(db, conversation_id, content, citations, COMPARE_MODE)
+
+    @staticmethod
+    def _persist_message(
+        db: Session,
+        conversation_id: str,
+        content: str,
+        citations: list[GroundedCitation],
+        mode: str | None,
+    ) -> Message:
         message = Message(
             conversation_id=conversation_id,
             role=MessageRole.ASSISTANT,
-            content=final_answer,
+            content=content,
+            mode=mode,
         )
         db.add(message)
         db.flush()

@@ -30,6 +30,33 @@ test('parses metadata, tokens, and completion across stream chunks', async () =>
   expect(complete).toBe(true);
 });
 
+test('sends the question mode to the stream endpoint', async () => {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          'event: done\ndata: {"id":"a1","role":"assistant","content":"A","citations":[],"created_at":""}\n\n',
+        ),
+      );
+      controller.close();
+    },
+  });
+  const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+
+  await streamQuestion(
+    'conversation',
+    'question',
+    { onMetadata: () => undefined, onToken: () => undefined, onDone: () => undefined },
+    undefined,
+    'compare',
+  );
+
+  const init = fetchMock.mock.calls[0][1] as RequestInit;
+  expect(JSON.parse(init.body as string)).toEqual({ question: 'question', mode: 'compare' });
+});
+
 test('parses CRLF frames, unspaced data fields, and ignores comments/id/retry', async () => {
   const encoder = new TextEncoder();
   const chunks = [

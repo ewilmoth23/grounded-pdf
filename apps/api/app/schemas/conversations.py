@@ -41,6 +41,7 @@ class MessageResponse(BaseModel):
     id: str
     role: MessageRole
     content: str
+    mode: str | None = None
     citations: list[CitationResponse] = Field(default_factory=list)
     created_at: datetime
 
@@ -61,6 +62,7 @@ class ConversationDetailResponse(ConversationResponse):
 
 class QuestionRequest(StrippedInput):
     question: str = Field(min_length=2, max_length=4000)
+    mode: Literal["answer", "compare"] = "answer"
 
 
 class AnswerResponse(BaseModel):

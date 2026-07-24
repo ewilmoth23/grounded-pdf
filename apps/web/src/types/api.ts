@@ -28,10 +28,14 @@ export interface Citation {
   ordinal: number;
 }
 
+export type QuestionMode = 'answer' | 'compare';
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** How the message was produced; null for regular answers. */
+  mode?: string | null;
   citations: Citation[];
   created_at: string;
 }

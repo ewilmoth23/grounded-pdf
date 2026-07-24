@@ -3,15 +3,19 @@ import { render, type RenderOptions } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 
-export function renderApp(ui: ReactElement, options?: RenderOptions) {
+export function renderApp(
+  ui: ReactElement,
+  options?: RenderOptions & { initialEntries?: string[] },
+) {
+  const { initialEntries, ...renderOptions } = options ?? {};
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const result = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
     </QueryClientProvider>,
-    options,
+    renderOptions,
   );
   return Object.assign(result, { queryClient: client });
 }

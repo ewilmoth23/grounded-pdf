@@ -24,6 +24,13 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Added
 
+- Cross-document compare mode: a composer toggle asks one question across two to four selected
+  documents. Retrieval runs separately per document, each section streams through its own citation
+  filter with only that document's markers, and a document without admissible evidence gets the
+  fixed insufficient-evidence response in its section without a provider call. Compare answers
+  render as side-by-side per-document panels on large screens (stacked on mobile) over the
+  existing SSE protocol, and a nullable `mode` column on messages (migration 0002) records how a
+  message was produced.
 - Instant semantic quote search: a Search page (⌘K / Ctrl+K from anywhere) embeds the query
   locally and returns exact stored passages — document, page badge, excerpt with the query terms
   emphasized, and a match-strength indicator — each deep-linking into the highlighted PDF viewer.
