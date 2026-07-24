@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "GroundedPDF"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     environment: Literal["development", "test", "production"] = "development"
     api_prefix: str = "/api/v1"
     data_dir: Path = Path("./data")
