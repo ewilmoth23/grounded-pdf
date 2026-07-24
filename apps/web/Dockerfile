@@ -8,7 +8,7 @@ ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 ENV NGINX_ENTRYPOINT_QUIET_LOGS=1
 ARG MAX_UPLOAD_BATCH_MB=200
 COPY nginx.conf /etc/nginx/conf.d/default.conf
