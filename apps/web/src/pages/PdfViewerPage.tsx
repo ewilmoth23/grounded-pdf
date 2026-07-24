@@ -1,4 +1,13 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  List,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
@@ -47,7 +56,24 @@ export function PdfViewerPage() {
   const [citedPage] = useState(requestedPage);
   const [highlightRanges, setHighlightRanges] = useState<Map<number, HighlightRange> | null>(null);
   const [highlightMissed, setHighlightMissed] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const detail = useQuery({
+    queryKey: ['document', documentId],
+    queryFn: () => api.documents.get(documentId ?? ''),
+    enabled: Boolean(documentId),
+  });
+  const outline = detail.data?.outline ?? null;
+  // The section the reader is inside: the last outline entry at or before this page.
+  const activeOutlineIndex = useMemo(() => {
+    if (!outline) return -1;
+    let active = -1;
+    outline.forEach((entry, index) => {
+      if (entry.page <= requestedPage) active = index;
+    });
+    return active;
+  }, [outline, requestedPage]);
 
   useEffect(() => setError(null), [documentId]);
   useEffect(() => setPageInput(String(requestedPage)), [requestedPage]);
@@ -188,7 +214,18 @@ export function PdfViewerPage() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-center gap-3 border-b bg-white px-4 py-2 dark:bg-ink-900">
+        <div className="relative flex items-center justify-center gap-3 border-b bg-white px-4 py-2 dark:bg-ink-900">
+          {outline && outline.length > 0 && (
+            <button
+              className="button-ghost absolute left-2 px-2 sm:left-4"
+              onClick={() => setOutlineOpen((open) => !open)}
+              aria-expanded={outlineOpen}
+              aria-label={outlineOpen ? 'Hide document outline' : 'Show document outline'}
+              title={outlineOpen ? 'Hide outline' : 'Show outline'}
+            >
+              <List className="size-4" />
+            </button>
+          )}
           <button
             className="button-ghost px-2"
             onClick={() => navigatePage(requestedPage - 1)}
@@ -227,46 +264,82 @@ export function PdfViewerPage() {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-8">
-          {error && (
-            <div className="mx-auto mb-4 max-w-xl">
-              <ErrorAlert message={error} />
-            </div>
-          )}
-          <Document
-            file={fileUrl}
-            onLoadSuccess={({ numPages }) => {
-              setPages(numPages);
-              if (requestedPage > numPages) navigatePage(numPages);
-            }}
-            onLoadError={() =>
-              setError(
-                'The PDF could not be displayed. It may have been deleted or become unavailable.',
-              )
-            }
-            loading={
-              <Skeleton className="mx-auto h-[70vh] max-w-3xl rounded" label="Loading PDF" />
-            }
-          >
-            <div
-              ref={pageContainerRef}
-              className="mx-auto w-fit rounded-md border-4 border-accent-500 bg-white shadow-2xl"
-              aria-label={`Cited page ${requestedPage}`}
+        <div className="relative flex min-h-0 flex-1">
+          {outlineOpen && outline && outline.length > 0 && (
+            <nav
+              aria-label="Document outline"
+              className="absolute inset-y-0 left-0 z-10 w-72 overflow-y-auto border-r bg-white p-3 shadow-xl dark:bg-ink-900 lg:static lg:z-auto lg:shrink-0 lg:shadow-none"
             >
-              <Page
-                pageNumber={requestedPage}
-                scale={scale}
-                renderTextLayer
-                renderAnnotationLayer
-                customTextRenderer={textRenderer}
-                onGetTextSuccess={(textContent) => handleTextContent(textContent.items)}
-                onGetTextError={() => {
-                  if (highlight && requestedPage === citedPage) setHighlightMissed(true);
-                }}
-                onRenderTextLayerSuccess={scrollToHighlight}
-              />
-            </div>
-          </Document>
+              <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.12em] text-ink-500 dark:text-ink-400">
+                Outline
+              </p>
+              <ul className="space-y-0.5">
+                {outline.map((entry, index) => (
+                  <li key={`${index}-${entry.page}`}>
+                    <button
+                      className={`w-full truncate rounded-md px-2 py-1.5 text-left text-sm transition-colors duration-150 ${
+                        index === activeOutlineIndex
+                          ? 'bg-accent-100 font-semibold text-accent-900 dark:bg-accent-950 dark:text-accent-200'
+                          : 'text-ink-700 hover:bg-ink-100 dark:text-ink-200 dark:hover:bg-ink-800'
+                      }`}
+                      style={{ paddingLeft: `${0.5 + (Math.min(entry.level, 3) - 1) * 0.75}rem` }}
+                      aria-current={index === activeOutlineIndex ? 'true' : undefined}
+                      title={entry.title}
+                      onClick={() => {
+                        navigatePage(entry.page);
+                        if (!window.matchMedia('(min-width: 1024px)').matches) {
+                          setOutlineOpen(false);
+                        }
+                      }}
+                    >
+                      {entry.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-8">
+            {error && (
+              <div className="mx-auto mb-4 max-w-xl">
+                <ErrorAlert message={error} />
+              </div>
+            )}
+            <Document
+              file={fileUrl}
+              onLoadSuccess={({ numPages }) => {
+                setPages(numPages);
+                if (requestedPage > numPages) navigatePage(numPages);
+              }}
+              onLoadError={() =>
+                setError(
+                  'The PDF could not be displayed. It may have been deleted or become unavailable.',
+                )
+              }
+              loading={
+                <Skeleton className="mx-auto h-[70vh] max-w-3xl rounded" label="Loading PDF" />
+              }
+            >
+              <div
+                ref={pageContainerRef}
+                className="mx-auto w-fit rounded-md border-4 border-accent-500 bg-white shadow-2xl"
+                aria-label={`Cited page ${requestedPage}`}
+              >
+                <Page
+                  pageNumber={requestedPage}
+                  scale={scale}
+                  renderTextLayer
+                  renderAnnotationLayer
+                  customTextRenderer={textRenderer}
+                  onGetTextSuccess={(textContent) => handleTextContent(textContent.items)}
+                  onGetTextError={() => {
+                    if (highlight && requestedPage === citedPage) setHighlightMissed(true);
+                  }}
+                  onRenderTextLayerSuccess={scrollToHighlight}
+                />
+              </div>
+            </Document>
+          </div>
         </div>
       </div>
     </div>

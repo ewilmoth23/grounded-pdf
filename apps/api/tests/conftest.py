@@ -7,6 +7,10 @@ from pathlib import Path
 os.environ["GROUNDEDPDF_ENVIRONMENT"] = "test"
 os.environ["GROUNDEDPDF_MODEL_PROVIDER"] = "mock"
 os.environ["GROUNDEDPDF_DATABASE_URL"] = "sqlite:///./data/test-bootstrap.db"
+# The whole suite shares one TestClient address; keep the production default
+# rate limit from failing unrelated tests as the suite grows. Rate limiting
+# itself is exercised explicitly against an isolated app in test_api.py.
+os.environ["GROUNDEDPDF_RATE_LIMIT_PER_MINUTE"] = "10000"
 
 import fitz
 import pytest

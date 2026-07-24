@@ -16,13 +16,25 @@ class DocumentResponse(BaseModel):
     searchable_page_count: int
     status: ProcessingStatus
     processing_error: str | None
+    stale_index: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class OutlineEntry(BaseModel):
+    level: int
+    title: str
+    page: int
 
 
 class DocumentDetailResponse(DocumentResponse):
     scanned_page_numbers: list[int] = Field(default_factory=list)
     chunk_count: int = 0
+    outline: list[OutlineEntry] | None = None
+
+
+class ReprocessStaleResponse(BaseModel):
+    queued: int
 
 
 class UploadResponse(BaseModel):

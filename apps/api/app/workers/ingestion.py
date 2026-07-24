@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -21,11 +22,27 @@ from app.models.entities import (
 from app.services.chunking import create_chunks
 from app.services.dependencies import get_embedding_provider, get_vector_store
 from app.services.embeddings import EmbeddingProvider
-from app.services.pdf import TesseractOcrExtractor, extract_pdf, normalize_text
-from app.services.settings import effective_settings
+from app.services.pdf import (
+    ExtractedDocument,
+    TesseractOcrExtractor,
+    extract_pdf,
+    normalize_text,
+)
+from app.services.settings import effective_settings, index_fingerprint
 from app.services.vector_store import VectorRecord, VectorStore
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_outline(extracted: ExtractedDocument) -> str | None:
+    if not extracted.outline:
+        return None
+    return json.dumps(
+        [
+            {"level": entry.level, "title": entry.title, "page": entry.page}
+            for entry in extracted.outline
+        ]
+    )
 
 
 class IngestionService:
@@ -139,6 +156,8 @@ class IngestionService:
                 document.title = (extracted.title or "")[:500] or None
                 document.page_count = extracted.page_count
                 document.searchable_page_count = 0
+                document.outline_json = _serialize_outline(extracted)
+                document.index_fingerprint = None
                 document.status = ProcessingStatus.FAILED
                 document.processing_error = message
                 job.status = ProcessingStatus.FAILED
@@ -177,6 +196,8 @@ class IngestionService:
             document.title = (extracted.title or "")[:500] or None
             document.page_count = extracted.page_count
             document.searchable_page_count = sum(page.is_searchable for page in extracted.pages)
+            document.outline_json = _serialize_outline(extracted)
+            document.index_fingerprint = index_fingerprint(self.settings)
             document.status = ProcessingStatus.READY
             job.status = ProcessingStatus.READY
             job.completed_at = datetime.now(UTC)

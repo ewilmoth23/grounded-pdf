@@ -117,6 +117,67 @@ test('renders API errors', async () => {
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('API unavailable'));
 });
 
+test('flags stale documents and reprocesses them in one click', async () => {
+  const staleDocument = {
+    ...failedDocument,
+    status: 'ready',
+    processing_error: null,
+    page_count: 4,
+    searchable_page_count: 4,
+    stale_index: true,
+  };
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(jsonResponse([staleDocument]))
+    .mockResolvedValueOnce(jsonResponse({ queued: 1 }, 202))
+    .mockImplementation(() =>
+      Promise.resolve(jsonResponse([{ ...staleDocument, status: 'queued', stale_index: false }])),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+  renderApp(<DocumentsPage />);
+
+  expect(
+    await screen.findByText(/1 document was indexed with different settings/),
+  ).toBeInTheDocument();
+  expect(screen.getByText('Index outdated')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Reprocess 1 document' }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/documents/reprocess-stale'),
+      expect.objectContaining({ method: 'POST' }),
+    ),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByText(/1 document was indexed with different settings/),
+    ).not.toBeInTheDocument(),
+  );
+});
+
+test('does not show the reprocess banner when no document is stale', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          ...failedDocument,
+          status: 'ready',
+          processing_error: null,
+          page_count: 4,
+          searchable_page_count: 4,
+          stale_index: false,
+        },
+      ]),
+    ),
+  );
+  renderApp(<DocumentsPage />);
+  expect(await screen.findByText('scan.pdf')).toBeInTheDocument();
+  expect(screen.queryByText(/indexed with different settings/)).not.toBeInTheDocument();
+  expect(screen.queryByText('Index outdated')).not.toBeInTheDocument();
+});
+
 test('supports drag and drop file selection', async () => {
   const fetchMock = vi
     .fn()

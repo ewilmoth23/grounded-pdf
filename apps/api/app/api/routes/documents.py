@@ -13,8 +13,10 @@ from app.schemas.common import DeleteResponse
 from app.schemas.documents import (
     DocumentDetailResponse,
     DocumentResponse,
+    OutlineEntry,
     ProcessingStatusResponse,
     RejectedUpload,
+    ReprocessStaleResponse,
     UploadResponse,
 )
 from app.services.dependencies import get_vector_store
@@ -23,7 +25,10 @@ from app.services.documents import (
     delete_document,
     document_details,
     document_file_path,
+    is_stale_index,
+    parse_outline,
 )
+from app.services.settings import effective_settings, index_fingerprint
 from app.workers.ingestion import process_document
 
 router = APIRouter()
@@ -71,17 +76,68 @@ async def upload_documents(
 
 
 @router.get("", response_model=list[DocumentResponse])
-def list_documents(db: Session = Depends(get_db)) -> list[Document]:
-    return list(db.scalars(select(Document).order_by(Document.created_at.desc())))
+def list_documents(
+    db: Session = Depends(get_db), settings: Settings = Depends(get_settings)
+) -> list[DocumentResponse]:
+    fingerprint = index_fingerprint(effective_settings(db, settings))
+    responses: list[DocumentResponse] = []
+    for document in db.scalars(select(Document).order_by(Document.created_at.desc())):
+        response = DocumentResponse.model_validate(document)
+        response.stale_index = is_stale_index(document, fingerprint)
+        responses.append(response)
+    return responses
+
+
+@router.post("/reprocess-stale", response_model=ReprocessStaleResponse, status_code=202)
+def reprocess_stale_documents(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ReprocessStaleResponse:
+    """Queue re-ingestion for every ready document indexed under different settings."""
+    fingerprint = index_fingerprint(effective_settings(db, settings))
+    stale_ids = [
+        document.id
+        for document in db.scalars(
+            select(Document)
+            .where(Document.status == ProcessingStatus.READY)
+            .order_by(Document.created_at)
+        )
+        if is_stale_index(document, fingerprint)
+    ]
+    queued = 0
+    for document_id in stale_ids:
+        claim = db.execute(
+            update(Document)
+            .where(Document.id == document_id, Document.status == ProcessingStatus.READY)
+            .values(status=ProcessingStatus.QUEUED, processing_error=None)
+        )
+        if getattr(claim, "rowcount", 0) != 1:
+            continue
+        queued += 1
+        background_tasks.add_task(process_document, document_id)
+    db.commit()
+    return ReprocessStaleResponse(queued=queued)
 
 
 @router.get("/{document_id}", response_model=DocumentDetailResponse)
-def get_document(document_id: str, db: Session = Depends(get_db)) -> DocumentDetailResponse:
+def get_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DocumentDetailResponse:
     document = require_document(db, document_id)
     scanned_pages, chunk_count = document_details(db, document)
     response = DocumentDetailResponse.model_validate(document)
     response.scanned_page_numbers = scanned_pages
     response.chunk_count = chunk_count
+    response.stale_index = is_stale_index(
+        document, index_fingerprint(effective_settings(db, settings))
+    )
+    outline = parse_outline(document.outline_json)
+    response.outline = (
+        [OutlineEntry.model_validate(entry) for entry in outline] if outline else None
+    )
     return response
 
 

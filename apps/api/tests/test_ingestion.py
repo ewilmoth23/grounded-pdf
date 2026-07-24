@@ -23,6 +23,7 @@ from app.models.entities import (
 )
 from app.services.documents import delete_document
 from app.services.embeddings import DeterministicEmbeddingProvider
+from app.services.settings import index_fingerprint
 from app.services.vector_store import InMemoryVectorStore
 from app.workers.ingestion import IngestionService, process_document, recover_interrupted_ingestion
 
@@ -98,6 +99,52 @@ def test_persisted_chunk_offsets_locate_chunk_text_within_page(
         assert page is not None
         assert 0 <= chunk.start_offset < chunk.end_offset <= len(page.raw_text)
         assert page.raw_text[chunk.start_offset : chunk.end_offset] == chunk.raw_text
+
+
+def test_ingestion_stores_outline_and_index_fingerprint(
+    db: Session, settings: Settings, tmp_path: Path
+) -> None:
+    import fitz
+
+    path = tmp_path / "outlined.pdf"
+    pdf = fitz.open()
+    pdf.new_page().insert_text(
+        (72, 72), "Introduction body text with enough characters to be searchable."
+    )
+    pdf.new_page().insert_text(
+        (72, 72), "Findings body text with enough characters to be searchable too."
+    )
+    pdf.set_toc([[1, "Introduction", 1], [1, "Findings", 2]])
+    pdf.save(path)
+    pdf.close()
+    document = add_document(db, settings, path)
+
+    IngestionService(settings, DeterministicEmbeddingProvider(), InMemoryVectorStore()).process(
+        db, document.id
+    )
+
+    db.refresh(document)
+    assert document.status == ProcessingStatus.READY
+    assert document.index_fingerprint == index_fingerprint(settings)
+    assert document.index_fingerprint == f"{settings.embedding_model}|chunk=240|overlap=40"
+    assert json.loads(document.outline_json or "[]") == [
+        {"level": 1, "title": "Introduction", "page": 1},
+        {"level": 1, "title": "Findings", "page": 2},
+    ]
+
+
+def test_document_without_bookmarks_stores_no_outline(
+    db: Session, settings: Settings, sample_pdf: Path
+) -> None:
+    document = add_document(db, settings, sample_pdf)
+
+    IngestionService(settings, DeterministicEmbeddingProvider(), InMemoryVectorStore()).process(
+        db, document.id
+    )
+
+    db.refresh(document)
+    assert document.status == ProcessingStatus.READY
+    assert document.outline_json is None
 
 
 def test_image_only_document_preserves_unsearchable_page_metadata(

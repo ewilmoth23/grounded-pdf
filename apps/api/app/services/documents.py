@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -91,6 +92,35 @@ def _document_from_stored(stored: StoredUpload) -> Document:
         file_size=stored.size,
         sha256=stored.sha256,
         status=ProcessingStatus.QUEUED,
+    )
+
+
+def parse_outline(outline_json: str | None) -> list[dict[str, int | str]] | None:
+    """Deserialize the stored outline defensively; malformed data reads as no outline."""
+    if not outline_json:
+        return None
+    try:
+        parsed = json.loads(outline_json)
+    except json.JSONDecodeError:
+        logger.warning("invalid_document_outline_ignored")
+        return None
+    if not isinstance(parsed, list):
+        return None
+    entries: list[dict[str, int | str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        level, title, page = item.get("level"), item.get("title"), item.get("page")
+        if isinstance(level, int) and isinstance(title, str) and isinstance(page, int):
+            entries.append({"level": level, "title": title, "page": page})
+    return entries or None
+
+
+def is_stale_index(document: Document, current_fingerprint: str) -> bool:
+    """A ready document indexed under different (or unrecorded) settings is stale."""
+    return (
+        document.status == ProcessingStatus.READY
+        and document.index_fingerprint != current_fingerprint
     )
 
 

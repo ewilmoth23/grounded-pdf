@@ -33,6 +33,13 @@ RUNTIME_KEY_ORDER = (
 )
 
 
+def index_fingerprint(settings: Settings) -> str:
+    """Identify the embedding model and chunk geometry an index was built with."""
+    return (
+        f"{settings.embedding_model}|chunk={settings.chunk_size}|overlap={settings.chunk_overlap}"
+    )
+
+
 def effective_settings(db: Session, base: Settings) -> Settings:
     rows = db.scalars(select(ApplicationSetting).where(ApplicationSetting.key.in_(RUNTIME_KEYS)))
     overrides: dict[str, Any] = {}

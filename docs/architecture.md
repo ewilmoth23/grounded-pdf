@@ -77,6 +77,17 @@ An ingestion retry first removes the document's prior vector records and child r
 deterministic upsert using IDs of the form `document:page:chunk`. A document becomes `ready` only after
 the embedding batch and vector upsert succeed. A failure is recorded with a safe user-facing message.
 
+Ingestion also records two pieces of per-document metadata with different trust roles. The PDF
+bookmark tree is captured as a bounded outline (truncated titles, page targets clamped to the
+document) and stored as JSON; it is presentation metadata only — the viewer uses it for section
+navigation, and it never participates in retrieval or citations. The index fingerprint — the
+embedding model plus chunk size and overlap in effect when the index was built — guards retrieval
+consistency: query vectors are only comparable to stored vectors produced under the same settings.
+When the effective runtime settings diverge from a ready document's fingerprint (or the fingerprint
+predates this mechanism), the API reports the index as stale, and a bulk reprocess endpoint
+re-queues those documents through the same atomic status claim as a manual retry, so stale vectors
+are fully replaced rather than mixed with new ones.
+
 ### Vector storage and embeddings
 
 Chroma is embedded in the API process and persisted locally. `sentence-transformers` loads lazily so

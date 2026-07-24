@@ -24,6 +24,21 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Added
 
+- Document outline navigation: ingestion captures the PDF bookmark tree (bounded to 500 entries
+  with clamped page targets, stored as JSON on the document via migration 0003), the document
+  detail endpoint serves it, and the viewer gains a collapsible outline sidebar — a persistent
+  left panel on large screens and a toggleable sheet below — whose entries indent by depth, jump
+  to the selected page, and highlight the section containing the current page. Documents without
+  bookmarks show no outline control.
+- Safe re-indexing: every successful ingestion records an index fingerprint (embedding model plus
+  chunk size and overlap, migration 0003). Ready documents whose fingerprint no longer matches
+  the effective runtime settings — including legacy documents indexed before fingerprints — are
+  reported as `stale_index` in document responses, flagged with an "Index outdated" chip, and
+  summarized in a Documents banner offering one-click bulk reprocessing.
+  `POST /documents/reprocess-stale` atomically claims each stale ready document through the
+  existing retry lifecycle (queued and failed documents are untouched) and re-ingestion fully
+  replaces the previous chunks and vectors. Settings notes that chunk changes require
+  reprocessing.
 - Grounded export: `GET /conversations/{id}/export?format=markdown|html` downloads a conversation
   as Markdown or a self-contained HTML file (inline CSS, no scripts, all content escaped) with the
   questions, answers, numbered citations (marker, document, page, excerpt), a per-answer

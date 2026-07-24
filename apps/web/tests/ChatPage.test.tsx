@@ -16,6 +16,7 @@ function documentRecord(id: string, status: DocumentRecord['status'] = 'ready'):
     searchable_page_count: 1,
     status,
     processing_error: null,
+    stale_index: false,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
   };

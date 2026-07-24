@@ -12,6 +12,15 @@ from app.core.exceptions import FileValidationError
 WHITESPACE_RE = re.compile(r"[\t\u00a0 ]+")
 BLANK_LINES_RE = re.compile(r"\n{3,}")
 MIN_SEARCHABLE_CHARACTERS = 24
+MAX_OUTLINE_ENTRIES = 500
+MAX_OUTLINE_TITLE_LENGTH = 300
+
+
+@dataclass(frozen=True)
+class OutlineEntry:
+    level: int
+    title: str
+    page: int
 
 
 @dataclass(frozen=True)
@@ -28,6 +37,7 @@ class ExtractedDocument:
     title: str | None
     page_count: int
     pages: list[ExtractedPage]
+    outline: list[OutlineEntry]
 
 
 class OcrExtractor(Protocol):
@@ -74,6 +84,30 @@ class TesseractOcrExtractor:
             raise FileValidationError("OCR failed for a scanned PDF page.", "ocr_failed") from exc
 
 
+def outline_from_toc(toc: list[list[object]], page_count: int) -> list[OutlineEntry]:
+    """Convert a PyMuPDF table of contents into bounded, display-safe outline entries."""
+    entries: list[OutlineEntry] = []
+    for item in toc:
+        if len(entries) >= MAX_OUTLINE_ENTRIES:
+            break
+        if len(item) < 3:
+            continue
+        raw_level, raw_title, raw_page = item[0], item[1], item[2]
+        if not isinstance(raw_level, int) or not isinstance(raw_page, int):
+            continue
+        title = str(raw_title).strip()[:MAX_OUTLINE_TITLE_LENGTH]
+        if not title:
+            continue
+        entries.append(
+            OutlineEntry(
+                level=max(1, raw_level),
+                title=title,
+                page=min(max(1, raw_page), page_count),
+            )
+        )
+    return entries
+
+
 def normalize_text(text: str) -> str:
     lines = [WHITESPACE_RE.sub(" ", line).strip() for line in text.replace("\r", "\n").split("\n")]
     normalized = "\n".join(lines)
@@ -114,6 +148,11 @@ def extract_pdf(
                 )
             metadata = document.metadata or {}
             title = (metadata.get("title") or "").strip() or None
+            try:
+                outline = outline_from_toc(document.get_toc(simple=True), document.page_count)
+            except (RuntimeError, ValueError):
+                # A malformed bookmark tree must never fail text extraction.
+                outline = []
             pages: list[ExtractedPage] = []
             for index, page in enumerate(document):
                 raw_text = page.get_text("text", sort=True)
@@ -134,7 +173,9 @@ def extract_pdf(
                         is_searchable=len(normalized) >= MIN_SEARCHABLE_CHARACTERS,
                     )
                 )
-            return ExtractedDocument(title=title, page_count=document.page_count, pages=pages)
+            return ExtractedDocument(
+                title=title, page_count=document.page_count, pages=pages, outline=outline
+            )
     except FileValidationError:
         raise
     except (fitz.FileDataError, RuntimeError, ValueError) as exc:

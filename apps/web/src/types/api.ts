@@ -9,8 +9,22 @@ export interface DocumentRecord {
   searchable_page_count: number;
   status: ProcessingStatus;
   processing_error: string | null;
+  /** True when a ready document's index was built with different settings. */
+  stale_index: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface OutlineEntry {
+  level: number;
+  title: string;
+  page: number;
+}
+
+export interface DocumentDetail extends DocumentRecord {
+  scanned_page_numbers: number[];
+  chunk_count: number;
+  outline: OutlineEntry[] | null;
 }
 
 export interface UploadResult {

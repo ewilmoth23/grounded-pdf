@@ -55,6 +55,11 @@ document content or fabricated interface is shown._
 - Grounded export: download any conversation as Markdown or a self-contained HTML file with
   questions, answers, numbered page-level sources, per-answer verification summaries, and the
   generation settings — rendered server-side from saved records, never from browser state
+- Document outline navigation: PDF bookmarks are captured during ingestion and shown in the
+  viewer as a collapsible section sidebar that jumps to the selected page
+- Safe re-indexing: each document records the embedding model and chunk settings it was indexed
+  with; when the runtime settings change, Documents shows which indexes are outdated and offers a
+  one-click reprocess so retrieval stays accurate
 - Conversation history, document selection, retryable processing, and complete deletion
 - Responsive React interface, safe Markdown rendering, dark mode, and a PDF.js page viewer
 - Deterministic test provider and synthetic PDF; automated tests do not require model access
@@ -241,9 +246,10 @@ chunking, and retrieval-count changes made in the UI are stored in SQLite.
 | `GROUNDEDPDF_ENABLE_OCR`                          | `false`                                  | Use installed Tesseract on scanned pages                 |
 | `VITE_API_BASE_URL`                               | `http://localhost:8000/api/v1`           | Browser-facing API root used by the Vite dev client      |
 
-Chunking and embedding changes do not silently rebuild existing vectors. Reprocess affected documents
-after changing those settings. If the Docker batch limit is increased, also increase
-`GROUNDEDPDF_UPLOAD_TMPFS_MB` enough to hold multipart temporary files.
+Chunking and embedding changes do not silently rebuild existing vectors. Documents indexed under
+different settings are flagged as outdated, and the Documents page offers a one-click reprocess.
+If the Docker batch limit is increased, also increase `GROUNDEDPDF_UPLOAD_TMPFS_MB` enough to hold
+multipart temporary files.
 
 ## Repository structure
 
@@ -267,7 +273,9 @@ sample_documents/  Synthetic sample specification and generated local PDF target
 - Exact-passage highlighting depends on the PDF text layer agreeing with the extracted text. When
   they diverge (typically scanned or OCR pages), the viewer falls back to the page-level citation
   and says so.
-- Changing the embedding model or chunk geometry requires manual document reprocessing.
+- Changing the embedding model or chunk geometry requires document reprocessing. The application
+  detects affected documents and offers a one-click reprocess, but the work itself re-runs
+  extraction and embedding for each document.
 - Local-first does not mean network-free: initial model downloads require network access, and a
   configured remote OpenAI-compatible provider receives retrieved source context.
 - Retrieval and citation ownership reduce hallucination risk but do not guarantee ideal wording or
@@ -275,8 +283,7 @@ sample_documents/  Synthetic sample specification and generated local PDF target
 
 ## Focused roadmap
 
-1. Add configuration fingerprints and safe bulk re-indexing after embedding/chunk changes.
-2. Add OCR language selection, preprocessing controls, and Docker OCR documentation.
+1. Add OCR language selection, preprocessing controls, and Docker OCR documentation.
 
 Accounts, cloud sync, web search, autonomous agents, billing, and Kubernetes are intentionally outside
 the first release.

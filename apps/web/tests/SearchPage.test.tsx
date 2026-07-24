@@ -14,6 +14,7 @@ const readyDocument: DocumentRecord = {
   searchable_page_count: 2,
   status: 'ready',
   processing_error: null,
+  stale_index: false,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 };

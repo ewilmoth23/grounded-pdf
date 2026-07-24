@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileText, FileUp, RefreshCw, RotateCcw, Trash2, UploadCloud } from 'lucide-react';
+import { FileText, FileUp, History, RefreshCw, RotateCcw, Trash2, UploadCloud } from 'lucide-react';
 import { useRef, useState, type DragEvent } from 'react';
 import { api } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -44,7 +44,12 @@ export function DocumentsPage() {
     mutationFn: api.documents.delete,
     onSettled: async () => queryClient.invalidateQueries({ queryKey: ['documents'] }),
   });
-  const actionError = retry.error ?? remove.error;
+  const reprocessStale = useMutation({
+    mutationFn: api.documents.reprocessStale,
+    onSettled: async () => queryClient.invalidateQueries({ queryKey: ['documents'] }),
+  });
+  const actionError = retry.error ?? remove.error ?? reprocessStale.error;
+  const staleCount = documents.data?.filter((doc) => doc.stale_index).length ?? 0;
 
   function selectFiles(files: FileList | null) {
     if (!upload.isPending && files?.length) upload.mutate(Array.from(files));
@@ -144,6 +149,30 @@ export function DocumentsPage() {
           <ErrorAlert message={actionError.message} />
         </div>
       )}
+      {staleCount > 0 && (
+        <div
+          role="status"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950"
+        >
+          <p className="text-sm text-amber-900 dark:text-amber-100">
+            {staleCount === 1
+              ? '1 document was indexed with different settings.'
+              : `${staleCount} documents were indexed with different settings.`}{' '}
+            Reprocess to keep retrieval accurate.
+          </p>
+          <button
+            className="button-primary px-3 py-1.5 text-sm"
+            disabled={reprocessStale.isPending}
+            onClick={() => {
+              if (!reprocessStale.isPending) reprocessStale.mutate();
+            }}
+          >
+            {reprocessStale.isPending
+              ? 'Queueing…'
+              : `Reprocess ${staleCount} ${staleCount === 1 ? 'document' : 'documents'}`}
+          </button>
+        </div>
+      )}
 
       {documents.isError ? (
         <ErrorAlert message={documents.error.message} />
@@ -190,6 +219,15 @@ export function DocumentsPage() {
                         {doc.title ?? doc.original_name}
                       </h2>
                       <StatusBadge status={doc.status} />
+                      {doc.stale_index && (
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                          title="This document's index was built with different settings."
+                        >
+                          <History className="size-3.5" aria-hidden="true" />
+                          Index outdated
+                        </span>
+                      )}
                     </div>
                     {doc.title && (
                       <p className="mt-0.5 truncate text-xs text-ink-500 dark:text-ink-400">

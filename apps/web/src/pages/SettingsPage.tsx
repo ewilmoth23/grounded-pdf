@@ -239,6 +239,10 @@ export function SettingsPage() {
                 Chunk overlap must be smaller than chunk size.
               </p>
             )}
+            <p className="mt-3 text-sm text-ink-500 dark:text-ink-400">
+              Changing chunk settings requires reprocessing existing documents — the Documents page
+              will offer a one-click reprocess.
+            </p>
             <dl className="mt-5 grid gap-3 border-t pt-5 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-ink-500 dark:text-ink-300">Embedding model</dt>

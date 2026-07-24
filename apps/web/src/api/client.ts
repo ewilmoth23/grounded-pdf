@@ -1,6 +1,7 @@
 import type {
   Conversation,
   ConversationDetail,
+  DocumentDetail,
   DocumentRecord,
   SafeSettings,
   SearchResult,
@@ -77,6 +78,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   documents: {
     list: () => request<DocumentRecord[]>('/documents'),
+    get: (id: string) => request<DocumentDetail>(`/documents/${id}`),
+    reprocessStale: () =>
+      request<{ queued: number }>('/documents/reprocess-stale', { method: 'POST' }),
     upload: (files: File[]) => {
       const body = new FormData();
       files.forEach((file) => body.append('files', file));

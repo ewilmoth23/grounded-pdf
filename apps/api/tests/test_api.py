@@ -13,6 +13,7 @@ from app.core.exceptions import GroundedPdfError
 from app.core.middleware import RateLimitMiddleware, RequestSizeLimitMiddleware
 from app.main import app as main_app
 from app.models.entities import ApplicationSetting, Document, ProcessingStatus
+from app.services.settings import index_fingerprint
 
 
 def test_health_and_validation_responses(client: TestClient) -> None:
@@ -317,6 +318,101 @@ def test_document_file_is_served_inline(
 
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "document_file_missing"
+
+
+def _add_indexed_document(
+    db: Session,
+    name: str,
+    status: ProcessingStatus,
+    fingerprint: str | None,
+    outline_json: str | None = None,
+) -> Document:
+    document = Document(
+        original_name=f"{name}.pdf",
+        storage_name=f"{name}.pdf",
+        file_size=100,
+        sha256=name.ljust(64, "0"),
+        page_count=2,
+        searchable_page_count=2,
+        status=status,
+        index_fingerprint=fingerprint,
+        outline_json=outline_json,
+    )
+    db.add(document)
+    db.commit()
+    return document
+
+
+def test_stale_index_detection_covers_changed_and_legacy_fingerprints(
+    client: TestClient, db: Session, settings: Settings
+) -> None:
+    current = index_fingerprint(settings)
+    old_fingerprint = "old-model|chunk=1|overlap=0"
+    fresh = _add_indexed_document(db, "fresh", ProcessingStatus.READY, current)
+    changed = _add_indexed_document(db, "changed", ProcessingStatus.READY, old_fingerprint)
+    legacy = _add_indexed_document(db, "legacy", ProcessingStatus.READY, None)
+    failed = _add_indexed_document(db, "failed", ProcessingStatus.FAILED, old_fingerprint)
+
+    listed = {item["id"]: item["stale_index"] for item in client.get("/api/v1/documents").json()}
+
+    assert listed[fresh.id] is False
+    assert listed[changed.id] is True
+    assert listed[legacy.id] is True
+    assert listed[failed.id] is False
+
+    # Changing runtime chunk settings makes the previously fresh index stale.
+    assert client.patch("/api/v1/settings", json={"chunk_size": 600}).status_code == 200
+    relisted = {item["id"]: item["stale_index"] for item in client.get("/api/v1/documents").json()}
+    assert relisted[fresh.id] is True
+
+
+def test_reprocess_stale_queues_only_stale_ready_documents(
+    client: TestClient, db: Session, settings: Settings
+) -> None:
+    current = index_fingerprint(settings)
+    fresh = _add_indexed_document(db, "fresh", ProcessingStatus.READY, current)
+    changed = _add_indexed_document(db, "changed", ProcessingStatus.READY, "old|chunk=1|overlap=0")
+    legacy = _add_indexed_document(db, "legacy", ProcessingStatus.READY, None)
+    queued = _add_indexed_document(db, "queued", ProcessingStatus.QUEUED, None)
+    failed = _add_indexed_document(db, "failed", ProcessingStatus.FAILED, None)
+
+    response = client.post("/api/v1/documents/reprocess-stale")
+
+    assert response.status_code == 202
+    assert response.json() == {"queued": 2}
+    for document in (fresh, changed, legacy, queued, failed):
+        db.refresh(document)
+    assert fresh.status == ProcessingStatus.READY
+    assert changed.status == ProcessingStatus.QUEUED
+    assert legacy.status == ProcessingStatus.QUEUED
+    assert queued.status == ProcessingStatus.QUEUED
+    assert failed.status == ProcessingStatus.FAILED
+
+    repeat = client.post("/api/v1/documents/reprocess-stale")
+    assert repeat.status_code == 202
+    assert repeat.json() == {"queued": 0}
+
+
+def test_document_detail_serves_stored_outline(
+    client: TestClient, db: Session, settings: Settings
+) -> None:
+    outline = (
+        '[{"level": 1, "title": "Introduction", "page": 1},'
+        ' {"level": 2, "title": "Methods", "page": 2}]'
+    )
+    outlined = _add_indexed_document(
+        db, "outlined", ProcessingStatus.READY, index_fingerprint(settings), outline
+    )
+    plain = _add_indexed_document(db, "plain", ProcessingStatus.READY, index_fingerprint(settings))
+
+    detail = client.get(f"/api/v1/documents/{outlined.id}").json()
+    assert detail["outline"] == [
+        {"level": 1, "title": "Introduction", "page": 1},
+        {"level": 2, "title": "Methods", "page": 2},
+    ]
+    assert detail["stale_index"] is False
+
+    assert client.get(f"/api/v1/documents/{plain.id}").json()["outline"] is None
 
 
 def test_conversation_crud_and_document_selection(client: TestClient) -> None:
