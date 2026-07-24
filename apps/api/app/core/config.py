@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     retrieval_count: int = Field(default=6, ge=1, le=20)
     retrieval_min_score: float = Field(default=0.15, ge=-1.0, le=1.0)
     retrieval_semantic_confidence_score: float = Field(default=0.45, ge=-1.0, le=1.0)
+    verification_supported_score: float = Field(default=0.6, ge=0.0, le=1.0)
+    verification_weak_score: float = Field(default=0.35, ge=0.0, le=1.0)
 
     model_provider: Literal["ollama", "openai_compatible", "mock"] = "ollama"
     model_name: str = "llama3.2:3b"
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
             raise ValueError("chunk_overlap must be at most half of chunk_size")
         if self.max_upload_batch_mb < self.max_upload_mb:
             raise ValueError("max_upload_batch_mb must be at least max_upload_mb")
+        if self.verification_weak_score > self.verification_supported_score:
+            raise ValueError("verification_weak_score must be at most verification_supported_score")
         self.model_name = self.model_name.strip()
         if not self.model_name:
             raise ValueError("model_name must not be blank")

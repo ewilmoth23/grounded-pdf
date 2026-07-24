@@ -99,6 +99,17 @@ provider is skipped and the API returns a deterministic insufficient-evidence re
 Citation-shaped text is filtered during streaming as well as before persistence, so an invented marker
 cannot appear transiently as if it were an application-owned source.
 
+### Answer verification
+
+Verification is a read-only lens over persisted answers. On request, the API splits a saved
+assistant message into sentences with a deterministic rule-based splitter (no model call), embeds
+each sentence locally, and scores it against the conversation's selected and cited documents by
+blending cosine similarity with the retrieval term-overlap heuristic. Fixed thresholds in
+configuration map each score to a supported, weak, or unsupported verdict, and every reported
+source is rebuilt from relational chunk records before it reaches the client. The answer itself is
+never modified; results are cached in-process per message because messages are immutable, and the
+fixed insufficient-evidence response verifies to an empty result.
+
 ### Provider abstraction
 
 `ChatProvider` exposes two operations: token streaming and a health check. Ollama and generic OpenAI-

@@ -4,6 +4,7 @@ import type {
   DocumentRecord,
   SafeSettings,
   UploadResult,
+  Verification,
 } from '../types/api';
 
 export const API_BASE =
@@ -104,6 +105,8 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ deleted: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
+    verify: (id: string, messageId: string) =>
+      request<Verification>(`/conversations/${id}/messages/${messageId}/verify`),
   },
   settings: {
     get: () => request<SafeSettings>('/settings'),

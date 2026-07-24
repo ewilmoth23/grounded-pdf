@@ -14,11 +14,19 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import Settings, get_settings
 from app.core.exceptions import GroundedPdfError
 from app.db.session import get_db
-from app.models.entities import Conversation, ConversationDocument, Document, Message, utc_now
+from app.models.entities import (
+    Conversation,
+    ConversationDocument,
+    Document,
+    Message,
+    MessageRole,
+    utc_now,
+)
 from app.providers.factory import create_chat_provider
 from app.rag.chat import ChatService
 from app.rag.grounding import StreamingCitationFilter
 from app.rag.retrieval import Retriever
+from app.rag.verification import VerificationResult, verify_message
 from app.schemas.common import DeleteResponse
 from app.schemas.conversations import (
     AnswerResponse,
@@ -29,6 +37,9 @@ from app.schemas.conversations import (
     ConversationResponse,
     MessageResponse,
     QuestionRequest,
+    VerificationResponse,
+    VerificationSentenceResponse,
+    VerificationSourceResponse,
 )
 from app.services.dependencies import get_embedding_provider, get_vector_store
 from app.services.settings import effective_settings
@@ -170,6 +181,57 @@ def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[M
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.created_at)
         )
+    )
+
+
+@router.get("/{conversation_id}/messages/{message_id}/verify", response_model=VerificationResponse)
+async def verify_answer(
+    conversation_id: str,
+    message_id: str,
+    db: Session = Depends(get_db),
+    base: Settings = Depends(get_settings),
+) -> VerificationResponse:
+    """Score each sentence of a persisted assistant answer against the documents.
+
+    Read-only and idempotent: the answer is never modified, and results are
+    cached in-process per message (messages are immutable once persisted).
+    """
+
+    def run() -> VerificationResult:
+        message = db.scalar(
+            select(Message)
+            .options(selectinload(Message.citations))
+            .where(Message.id == message_id, Message.conversation_id == conversation_id)
+        )
+        if message is None or message.role != MessageRole.ASSISTANT:
+            raise GroundedPdfError(
+                "Assistant message not found", code="message_not_found", status_code=404
+            )
+        runtime = effective_settings(db, base)
+        return verify_message(db, runtime, get_embedding_provider(), get_vector_store(), message)
+
+    result = await run_in_threadpool(run)
+    return VerificationResponse(
+        message_id=result.message_id,
+        generated_at=result.generated_at,
+        sentences=[
+            VerificationSentenceResponse(
+                text=sentence.text,
+                verdict=sentence.verdict,
+                score=sentence.score,
+                source=(
+                    VerificationSourceResponse(
+                        document_id=sentence.source.document_id,
+                        document_name=sentence.source.document_name,
+                        page_number=sentence.source.page_number,
+                        excerpt=sentence.source.excerpt,
+                    )
+                    if sentence.source
+                    else None
+                ),
+            )
+            for sentence in result.sentences
+        ],
     )
 
 

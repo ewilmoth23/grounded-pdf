@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -65,3 +66,23 @@ class QuestionRequest(StrippedInput):
 class AnswerResponse(BaseModel):
     user_message: MessageResponse
     assistant_message: MessageResponse
+
+
+class VerificationSourceResponse(BaseModel):
+    document_id: str
+    document_name: str
+    page_number: int
+    excerpt: str
+
+
+class VerificationSentenceResponse(BaseModel):
+    text: str
+    verdict: Literal["supported", "weak", "unsupported"]
+    score: float
+    source: VerificationSourceResponse | None
+
+
+class VerificationResponse(BaseModel):
+    message_id: str
+    generated_at: datetime
+    sentences: list[VerificationSentenceResponse]

@@ -5,16 +5,30 @@ import { Link, useLocation } from 'react-router';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../../types/api';
 import { highlightParamValue } from '../../utils/highlight';
+import { VerificationPanel } from './VerificationPanel';
+
+/** Streamed or stopped placeholders are not persisted, so they cannot be verified. */
+function isPersistedId(id: string): boolean {
+  return id !== 'streaming' && !id.startsWith('stopped-');
+}
 
 export const MessageBubble = memo(function MessageBubble({
   message,
   streaming = false,
+  conversationId,
 }: {
   message: Message;
   streaming?: boolean;
+  conversationId?: string;
 }) {
   const assistant = message.role === 'assistant';
   const location = useLocation();
+  const verifiable =
+    assistant &&
+    !streaming &&
+    Boolean(conversationId) &&
+    Boolean(message.content) &&
+    isPersistedId(message.id);
   return (
     <article
       className={`flex motion-safe:animate-message-in ${assistant ? 'justify-start' : 'justify-end'}`}
@@ -79,6 +93,10 @@ export const MessageBubble = memo(function MessageBubble({
               ))}
             </ul>
           </details>
+        )}
+
+        {verifiable && (
+          <VerificationPanel conversationId={conversationId!} messageId={message.id} />
         )}
       </div>
     </article>

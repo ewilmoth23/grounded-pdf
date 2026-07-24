@@ -44,6 +44,8 @@ document content or fabricated interface is shown._
 - Server-sent-event streaming with provider and interrupted-stream failure handling
 - Application-owned inline citations and source cards that open the original PDF page with the
   cited passage highlighted when text geometry allows
+- Claim-level answer verification: each sentence of a saved answer is checked against your
+  documents and labeled supported, weak, or not found, with links to the matched evidence
 - Conversation history, document selection, retryable processing, and complete deletion
 - Responsive React interface, safe Markdown rendering, dark mode, and a PDF.js page viewer
 - Deterministic test provider and synthetic PDF; automated tests do not require model access
@@ -215,6 +217,8 @@ chunking, and retrieval-count changes made in the UI are stored in SQLite.
 | `GROUNDEDPDF_RETRIEVAL_COUNT`                     | `6`                                      | Maximum retrieved context chunks                         |
 | `GROUNDEDPDF_RETRIEVAL_MIN_SCORE`                 | `0.15`                                   | Minimum cosine similarity                                |
 | `GROUNDEDPDF_RETRIEVAL_SEMANTIC_CONFIDENCE_SCORE` | `0.45`                                   | Similarity that can admit evidence without term overlap  |
+| `GROUNDEDPDF_VERIFICATION_SUPPORTED_SCORE`        | `0.6`                                    | Combined score at which a verified claim is "supported"  |
+| `GROUNDEDPDF_VERIFICATION_WEAK_SCORE`             | `0.35`                                   | Combined score at which a verified claim is a weak match |
 | `GROUNDEDPDF_MODEL_PROVIDER`                      | `ollama`                                 | `ollama` or `openai_compatible`; `mock` is test-only     |
 | `GROUNDEDPDF_MODEL_NAME`                          | `llama3.2:3b`                            | Provider model identifier                                |
 | `GROUNDEDPDF_OLLAMA_BASE_URL`                     | `http://localhost:11434`                 | Native Ollama endpoint                                   |

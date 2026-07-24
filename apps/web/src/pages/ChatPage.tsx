@@ -454,6 +454,7 @@ export function ChatPage() {
                         key={message.id}
                         message={message}
                         streaming={streaming && message.id === 'streaming'}
+                        conversationId={conversationId}
                       />
                     ))
                   )}

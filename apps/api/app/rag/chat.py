@@ -35,6 +35,43 @@ from app.services.vector_store import VectorMatch
 logger = logging.getLogger(__name__)
 
 
+def validate_matches(
+    db: Session, matches: list[VectorMatch], document_ids: list[str]
+) -> list[VectorMatch]:
+    """Rebuild retrieved evidence from relational chunks before trusting it."""
+    if not matches:
+        return []
+    chunks = db.scalars(
+        select(DocumentChunk)
+        .options(joinedload(DocumentChunk.document))
+        .where(
+            DocumentChunk.embedding_id.in_([match.id for match in matches]),
+            DocumentChunk.document_id.in_(document_ids),
+        )
+    )
+    by_embedding_id = {chunk.embedding_id: chunk for chunk in chunks}
+    validated: list[VectorMatch] = []
+    for match in matches:
+        chunk = by_embedding_id.get(match.id)
+        if chunk is None:
+            continue
+        validated.append(
+            VectorMatch(
+                id=chunk.embedding_id,
+                text=chunk.normalized_text,
+                metadata={
+                    "document_id": chunk.document_id,
+                    "document_name": chunk.document.original_name,
+                    "page_number": chunk.page_number,
+                    "chunk_index": chunk.chunk_index,
+                    "chunk_id": chunk.id,
+                },
+                score=match.score,
+            )
+        )
+    return validated
+
+
 class ChatService:
     def __init__(self, settings: Settings, retriever: Retriever, provider: ChatProvider) -> None:
         self.settings = settings
@@ -91,37 +128,7 @@ class ChatService:
         db: Session, matches: list[VectorMatch], ready_ids: list[str]
     ) -> list[VectorMatch]:
         """Rebuild retrieved evidence from relational chunks before prompting or citing it."""
-        if not matches:
-            return []
-        chunks = db.scalars(
-            select(DocumentChunk)
-            .options(joinedload(DocumentChunk.document))
-            .where(
-                DocumentChunk.embedding_id.in_([match.id for match in matches]),
-                DocumentChunk.document_id.in_(ready_ids),
-            )
-        )
-        by_embedding_id = {chunk.embedding_id: chunk for chunk in chunks}
-        validated: list[VectorMatch] = []
-        for match in matches:
-            chunk = by_embedding_id.get(match.id)
-            if chunk is None:
-                continue
-            validated.append(
-                VectorMatch(
-                    id=chunk.embedding_id,
-                    text=chunk.normalized_text,
-                    metadata={
-                        "document_id": chunk.document_id,
-                        "document_name": chunk.document.original_name,
-                        "page_number": chunk.page_number,
-                        "chunk_index": chunk.chunk_index,
-                        "chunk_id": chunk.id,
-                    },
-                    score=match.score,
-                )
-            )
-        return validated
+        return validate_matches(db, matches, ready_ids)
 
     async def tokens(self, prompt: str | None) -> AsyncIterator[str]:
         if prompt is None:

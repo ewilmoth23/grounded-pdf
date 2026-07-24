@@ -36,6 +36,28 @@ export interface Message {
   created_at: string;
 }
 
+export type VerificationVerdict = 'supported' | 'weak' | 'unsupported';
+
+export interface VerificationSource {
+  document_id: string;
+  document_name: string;
+  page_number: number;
+  excerpt: string;
+}
+
+export interface VerificationSentence {
+  text: string;
+  verdict: VerificationVerdict;
+  score: number;
+  source: VerificationSource | null;
+}
+
+export interface Verification {
+  message_id: string;
+  generated_at: string;
+  sentences: VerificationSentence[];
+}
+
 export interface Conversation {
   id: string;
   title: string;

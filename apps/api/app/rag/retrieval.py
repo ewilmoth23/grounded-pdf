@@ -41,7 +41,8 @@ def _token_set(text: str) -> set[str]:
     return {token.lower() for token in TOKEN_RE.findall(text) if len(token) > 2}
 
 
-def _content_tokens(text: str) -> set[str]:
+def content_tokens(text: str) -> set[str]:
+    """Meaningful lowercase tokens used for the term-overlap heuristic."""
     return _token_set(text) - STOP_WORDS
 
 
@@ -96,7 +97,7 @@ class Retriever:
             for candidate in candidates
             if candidate.score >= self.settings.retrieval_min_score
             and (
-                bool(_content_tokens(question) & _content_tokens(candidate.text))
+                bool(content_tokens(question) & content_tokens(candidate.text))
                 or candidate.score >= self.settings.retrieval_semantic_confidence_score
             )
         ]

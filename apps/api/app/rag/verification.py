@@ -1,0 +1,255 @@
+"""Claim-level verification of persisted assistant answers.
+
+Verification is a read-only lens over an already persisted answer: it splits the
+answer into sentences with a deterministic rule-based splitter (no model), embeds
+each sentence, and scores it against the evidence available to the conversation.
+It never mutates the message, its citations, or any retrieval state.
+
+Caching: results are held in a small in-process LRU keyed by message id. A
+message is immutable once persisted, so the cache needs no invalidation; a
+database column was deliberately avoided because verification is a derived,
+recomputable artifact and adding schema for it would be churn without benefit.
+"""
+
+from __future__ import annotations
+
+import re
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.config import Settings
+from app.models.entities import ConversationDocument, Message, utc_now
+from app.rag.chat import validate_matches
+from app.rag.grounding import CITATION_MARKER_RE, INSUFFICIENT_EVIDENCE
+from app.rag.retrieval import content_tokens
+from app.services.embeddings import EmbeddingProvider
+from app.services.vector_store import VectorMatch, VectorStore
+
+Verdict = Literal["supported", "weak", "unsupported"]
+
+_CANDIDATES_PER_SENTENCE = 5
+_EXCERPT_LIMIT = 320
+_CACHE_LIMIT = 128
+
+# Dotted tokens that end sentences without ending the sentence. "p"/"pp" also
+# protect the page part of citation markers ("[name, p. 2]") from splitting.
+_ABBREVIATIONS = frozenset(
+    {
+        "al",
+        "approx",
+        "cf",
+        "dept",
+        "dr",
+        "e.g",
+        "eg",
+        "est",
+        "etc",
+        "fig",
+        "i.e",
+        "ie",
+        "inc",
+        "jr",
+        "mr",
+        "mrs",
+        "ms",
+        "no",
+        "p",
+        "pp",
+        "prof",
+        "sr",
+        "st",
+        "vs",
+    }
+)
+
+# Sentence boundary: terminal punctuation, whitespace, then a capital or digit
+# (optionally behind an opening quote/bracket). Decimals never match because a
+# decimal point has no trailing whitespace.
+_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[]?[A-Z0-9])")
+_TRAILING_WORD_RE = re.compile(r"([A-Za-z][A-Za-z.]*)\.$")
+# Markdown list markers, heading hashes, and blockquote prefixes are noise for
+# claim checking; strip them from the front of each line before splitting.
+_LINE_NOISE_RE = re.compile(r"^\s*(?:[-*+]\s+|\d{1,3}[.)]\s+|#{1,6}\s+|>\s*)+")
+
+
+@dataclass(frozen=True)
+class VerifiedSource:
+    document_id: str
+    document_name: str
+    page_number: int
+    excerpt: str
+
+
+@dataclass(frozen=True)
+class VerifiedSentence:
+    text: str
+    verdict: Verdict
+    score: float
+    source: VerifiedSource | None
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    message_id: str
+    generated_at: datetime
+    sentences: tuple[VerifiedSentence, ...]
+
+
+_cache: OrderedDict[str, VerificationResult] = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def clear_verification_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def _cache_get(message_id: str) -> VerificationResult | None:
+    with _cache_lock:
+        result = _cache.get(message_id)
+        if result is not None:
+            _cache.move_to_end(message_id)
+        return result
+
+
+def _cache_put(message_id: str, result: VerificationResult) -> None:
+    with _cache_lock:
+        _cache[message_id] = result
+        _cache.move_to_end(message_id)
+        while len(_cache) > _CACHE_LIMIT:
+            _cache.popitem(last=False)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Deterministic rule-based sentence splitter for Markdown answers.
+
+    Splits on sentence-ending punctuation followed by whitespace and a capital
+    letter or digit, protects common abbreviations and decimals, treats every
+    line as its own segment, and drops Markdown list/heading prefixes.
+    """
+    sentences: list[str] = []
+    for raw_line in text.splitlines():
+        line = _LINE_NOISE_RE.sub("", raw_line).strip()
+        if not line:
+            continue
+        start = 0
+        for boundary in _BOUNDARY_RE.finditer(line):
+            candidate = line[start : boundary.start()].strip()
+            trailing = _TRAILING_WORD_RE.search(candidate)
+            if trailing and trailing.group(1).lower() in _ABBREVIATIONS:
+                continue
+            if candidate:
+                sentences.append(candidate)
+            start = boundary.end()
+        tail = line[start:].strip()
+        if tail:
+            sentences.append(tail)
+    return sentences
+
+
+def _scoring_text(sentence: str) -> str:
+    """Sentence text used for embedding and overlap; citation markers are noise."""
+    return CITATION_MARKER_RE.sub(" ", sentence).strip()
+
+
+def _excerpt(text: str) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) > _EXCERPT_LIMIT:
+        return collapsed[: _EXCERPT_LIMIT - 3] + "…"
+    return collapsed
+
+
+def _combined_score(sentence_tokens: set[str], match: VectorMatch) -> float:
+    """Blend cosine similarity with the retrieval term-overlap heuristic."""
+    cosine = max(0.0, min(1.0, match.score))
+    chunk_tokens = content_tokens(match.text)
+    overlap = len(sentence_tokens & chunk_tokens) / len(sentence_tokens) if sentence_tokens else 0.0
+    return round(0.5 * cosine + 0.5 * overlap, 4)
+
+
+def _verdict(score: float, settings: Settings) -> Verdict:
+    if score >= settings.verification_supported_score:
+        return "supported"
+    if score >= settings.verification_weak_score:
+        return "weak"
+    return "unsupported"
+
+
+def _scoped_document_ids(db: Session, message: Message) -> list[str]:
+    """Selected conversation documents plus any documents the answer cited."""
+    selected = db.scalars(
+        select(ConversationDocument.document_id).where(
+            ConversationDocument.conversation_id == message.conversation_id
+        )
+    )
+    cited = (citation.document_id for citation in message.citations)
+    return list(dict.fromkeys([*selected, *cited]))
+
+
+def verify_message(
+    db: Session,
+    settings: Settings,
+    embeddings: EmbeddingProvider,
+    vector_store: VectorStore,
+    message: Message,
+) -> VerificationResult:
+    """Score each sentence of a persisted assistant answer against the documents."""
+    cached = _cache_get(message.id)
+    if cached is not None:
+        return cached
+
+    content = message.content.strip()
+    if not content or content == INSUFFICIENT_EVIDENCE:
+        result = VerificationResult(message_id=message.id, generated_at=utc_now(), sentences=())
+        _cache_put(message.id, result)
+        return result
+
+    candidates: list[tuple[str, set[str], str]] = []
+    for sentence in split_sentences(content):
+        scoring_text = _scoring_text(sentence)
+        tokens = content_tokens(scoring_text)
+        if not tokens:
+            continue
+        candidates.append((sentence, tokens, scoring_text))
+
+    document_ids = _scoped_document_ids(db, message)
+    verified: list[VerifiedSentence] = []
+    if candidates:
+        vectors = embeddings.embed([scoring_text for _, _, scoring_text in candidates])
+        for (sentence, tokens, _), vector in zip(candidates, vectors, strict=True):
+            matches = (
+                vector_store.query(vector, document_ids, _CANDIDATES_PER_SENTENCE)
+                if document_ids
+                else []
+            )
+            best_score = 0.0
+            best_match: VectorMatch | None = None
+            for match in validate_matches(db, matches, document_ids):
+                score = _combined_score(tokens, match)
+                if best_match is None or score > best_score:
+                    best_score = score
+                    best_match = match
+            verdict = _verdict(best_score, settings)
+            source: VerifiedSource | None = None
+            if best_match is not None and verdict != "unsupported":
+                source = VerifiedSource(
+                    document_id=str(best_match.metadata["document_id"]),
+                    document_name=str(best_match.metadata["document_name"]),
+                    page_number=int(best_match.metadata["page_number"]),
+                    excerpt=_excerpt(best_match.text),
+                )
+            verified.append(
+                VerifiedSentence(text=sentence, verdict=verdict, score=best_score, source=source)
+            )
+
+    result = VerificationResult(
+        message_id=message.id, generated_at=utc_now(), sentences=tuple(verified)
+    )
+    _cache_put(message.id, result)
+    return result

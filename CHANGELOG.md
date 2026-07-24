@@ -24,6 +24,12 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Added
 
+- Claim-level verification: a "Verify answer" action on each completed assistant message splits
+  the saved answer into sentences with a deterministic rule-based splitter, scores each sentence
+  against the conversation's documents (cosine similarity plus term overlap), and renders a
+  supported / weak match / not found panel with unsupported claims first and evidence links into
+  the highlighted viewer. Verification is a read-only lens: it never changes the answer, and
+  results are cached in-process per message.
 - Exact evidence highlighting: source cards now open the cited page with the cited passage
   highlighted in the PDF text layer and scrolled into view. Matching normalizes case, whitespace,
   ligatures, and end-of-line hyphenation, with a longest-shared-run fallback when extraction and
