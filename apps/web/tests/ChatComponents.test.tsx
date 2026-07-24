@@ -30,7 +30,12 @@ test('renders structured citations linked to the correct page', () => {
   );
   expect(screen.getByText('Sources (1)')).toBeInTheDocument();
   const source = screen.getByRole('link', { name: 'Open sample.pdf page 2' });
-  expect(source).toHaveAttribute('href', '/documents/doc-1/view?page=2');
+  expect(source).toHaveAttribute(
+    'href',
+    `/documents/doc-1/view?page=2&highlight=${encodeURIComponent(
+      'The measured efficiency gain was 37 percent.',
+    )}`,
+  );
 });
 
 test('citation sources are collapsed by default', () => {

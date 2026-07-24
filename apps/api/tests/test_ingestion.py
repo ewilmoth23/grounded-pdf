@@ -76,6 +76,30 @@ def test_ingestion_is_idempotent_and_preserves_pages(
     assert len(vectors.records) == first_count
 
 
+def test_persisted_chunk_offsets_locate_chunk_text_within_page(
+    db: Session, settings: Settings, sample_pdf: Path
+) -> None:
+    """Stored offsets must slice the page's extracted text exactly (evidence highlighting)."""
+    document = add_document(db, settings, sample_pdf)
+    service = IngestionService(settings, DeterministicEmbeddingProvider(), InMemoryVectorStore())
+
+    service.process(db, document.id)
+
+    chunks = list(
+        db.scalars(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document.id)
+            .order_by(DocumentChunk.page_number, DocumentChunk.chunk_index)
+        )
+    )
+    assert chunks
+    for chunk in chunks:
+        page = db.get(DocumentPage, chunk.page_id)
+        assert page is not None
+        assert 0 <= chunk.start_offset < chunk.end_offset <= len(page.raw_text)
+        assert page.raw_text[chunk.start_offset : chunk.end_offset] == chunk.raw_text
+
+
 def test_image_only_document_preserves_unsearchable_page_metadata(
     db: Session, settings: Settings, tmp_path: Path
 ) -> None:

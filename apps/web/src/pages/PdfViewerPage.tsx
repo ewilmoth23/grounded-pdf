@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -7,6 +7,11 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { api } from '../api/client';
 import { ErrorAlert } from '../components/Feedback';
 import { Skeleton } from '../components/Skeleton';
+import {
+  findExcerptRanges,
+  renderTextItemWithHighlight,
+  type HighlightRange,
+} from '../utils/highlight';
 
 const pdfWorkerUrl = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url);
 pdfWorkerUrl.searchParams.set('v', pdfjs.version);
@@ -23,13 +28,71 @@ export function PdfViewerPage() {
     typeof requestedReturnTo === 'string' && requestedReturnTo.startsWith('/chat')
       ? requestedReturnTo
       : '/chat';
+  // The full excerpt travels in router state; the search parameter is a
+  // truncated fallback so the link still highlights when opened in a new tab.
+  const stateHighlight = (location.state as { highlight?: unknown } | null)?.highlight;
+  const paramHighlight = searchParams.get('highlight');
+  const highlight =
+    typeof stateHighlight === 'string' && stateHighlight.trim()
+      ? stateHighlight
+      : paramHighlight?.trim()
+        ? paramHighlight
+        : null;
   const [pages, setPages] = useState<number | null>(null);
   const [scale, setScale] = useState(1.15);
   const [error, setError] = useState<string | null>(null);
   const [pageInput, setPageInput] = useState(String(requestedPage));
+  // The page the citation pointed at when the viewer opened; highlighting only
+  // applies there, so paging around never claims evidence on other pages.
+  const [citedPage] = useState(requestedPage);
+  const [highlightRanges, setHighlightRanges] = useState<Map<number, HighlightRange> | null>(null);
+  const [highlightMissed, setHighlightMissed] = useState(false);
+  const pageContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => setError(null), [documentId]);
   useEffect(() => setPageInput(String(requestedPage)), [requestedPage]);
+  useEffect(() => {
+    if (requestedPage !== citedPage) {
+      setHighlightRanges(null);
+      setHighlightMissed(false);
+    }
+  }, [citedPage, requestedPage]);
+
+  const handleTextContent = useCallback(
+    (items: readonly unknown[]) => {
+      if (!highlight || requestedPage !== citedPage) return;
+      const strings = items.map((item) =>
+        item && typeof item === 'object' && 'str' in item ? String(item.str) : '',
+      );
+      const ranges = findExcerptRanges(strings, highlight);
+      if (ranges) {
+        setHighlightRanges(new Map(ranges.map((range) => [range.itemIndex, range])));
+        setHighlightMissed(false);
+      } else {
+        setHighlightRanges(null);
+        setHighlightMissed(true);
+      }
+    },
+    [citedPage, highlight, requestedPage],
+  );
+
+  const textRenderer = useMemo(() => {
+    if (!highlightRanges) return undefined;
+    return ({ str, itemIndex }: { str: string; itemIndex: number }) =>
+      renderTextItemWithHighlight(str, highlightRanges.get(itemIndex));
+  }, [highlightRanges]);
+
+  const scrollToHighlight = useCallback(() => {
+    if (!highlightRanges) return;
+    const mark = pageContainerRef.current?.querySelector('mark.evidence-highlight');
+    if (!mark) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    mark.scrollIntoView({
+      block: 'center',
+      inline: 'nearest',
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    });
+  }, [highlightRanges]);
 
   const navigatePage = useCallback(
     (page: number) => {
@@ -93,6 +156,11 @@ export function PdfViewerPage() {
             <p className="text-xs text-accent-700 dark:text-accent-400">
               Cited page {requestedPage}
             </p>
+            {highlightMissed && requestedPage === citedPage && (
+              <p className="text-xs text-ink-500 dark:text-ink-400">
+                Evidence is on this page; exact position unavailable.
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -181,6 +249,7 @@ export function PdfViewerPage() {
             }
           >
             <div
+              ref={pageContainerRef}
               className="mx-auto w-fit rounded-md border-4 border-accent-500 bg-white shadow-2xl"
               aria-label={`Cited page ${requestedPage}`}
             >
@@ -189,6 +258,12 @@ export function PdfViewerPage() {
                 scale={scale}
                 renderTextLayer
                 renderAnnotationLayer
+                customTextRenderer={textRenderer}
+                onGetTextSuccess={(textContent) => handleTextContent(textContent.items)}
+                onGetTextError={() => {
+                  if (highlight && requestedPage === citedPage) setHighlightMissed(true);
+                }}
+                onRenderTextLayerSuccess={scrollToHighlight}
               />
             </div>
           </Document>

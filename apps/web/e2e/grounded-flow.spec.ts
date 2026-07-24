@@ -29,9 +29,13 @@ test('upload, process, ask a grounded question, and open the cited page', async 
   const citation = page.getByRole('link', { name: /Open groundedpdf-sample.pdf page 2/i });
   await expect(citation).toBeVisible();
   await citation.click();
+  // Page-level citation indicators remain the baseline assertion.
   await expect(page.getByText('Cited page 2')).toBeVisible();
   await expect(page.getByLabel('Cited page 2')).toBeVisible();
   await expect(page.getByText(/Pilot Findings/i)).toBeVisible({ timeout: 30_000 });
+  // Exact evidence highlighting: the cited passage is wrapped in text-layer marks.
+  const highlighted = page.locator('mark.evidence-highlight', { hasText: '37' });
+  await expect(highlighted.first()).toBeVisible({ timeout: 30_000 });
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+$/);
   await expect(page.getByLabel('assistant message').last()).toContainText(/couldn't find enough/i);

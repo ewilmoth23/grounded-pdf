@@ -92,4 +92,10 @@
   .panel {
     @apply rounded-xl border bg-white shadow-panel dark:bg-ink-900 dark:ring-1 dark:ring-white/[0.06];
   }
+
+  /* Cited-evidence highlight inside the PDF.js text layer. The text stays
+     transparent so the canvas glyphs underneath remain the visible text. */
+  mark.evidence-highlight {
+    @apply rounded-sm bg-accent-400/40 text-transparent shadow-[0_0_0_2px_rgb(69_189_155_/_0.35)] motion-safe:animate-evidence-settle;
+  }
 }

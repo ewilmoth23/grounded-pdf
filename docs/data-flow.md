@@ -79,10 +79,20 @@ flowchart LR
   Citation --> Card["Web source card"]
   Card --> File["Safe PDF endpoint"]
   File --> Page["PDF.js cited-page navigation"]
+  Page --> Highlight["Text-layer excerpt highlight"]
 ```
 
 The model can repeat a supplied marker, but it cannot create the citation object's document ID, file
 URL, page target, excerpt, score, or ordinal. Those values come from the retrieval record.
+
+When a source card opens the viewer, the citation's excerpt travels with the navigation (router
+state, with a truncated `highlight` search parameter as a fallback). The viewer normalizes the
+excerpt and the PDF.js text-layer strings (case, whitespace, ligatures, end-of-line hyphenation),
+locates the excerpt — exact match first, then the longest shared run when extraction and the text
+layer disagree — and wraps the matched characters in highlight marks before scrolling the first one
+into view. This is presentation only: the browser never supplies citation data, and when no reliable
+match exists (typically scanned or OCR pages) the viewer keeps the page-level indicator and shows
+"Evidence is on this page; exact position unavailable."
 
 ## Deletion
 

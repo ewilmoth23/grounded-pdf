@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { Link, useLocation } from 'react-router';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../../types/api';
+import { highlightParamValue } from '../../utils/highlight';
 
 export const MessageBubble = memo(function MessageBubble({
   message,
@@ -55,8 +56,8 @@ export const MessageBubble = memo(function MessageBubble({
               {message.citations.map((citation) => (
                 <li key={`${citation.document_id}-${citation.page_number}-${citation.ordinal}`}>
                   <Link
-                    to={`/documents/${citation.document_id}/view?page=${citation.page_number}`}
-                    state={{ returnTo: location.pathname }}
+                    to={`/documents/${citation.document_id}/view?page=${citation.page_number}&highlight=${encodeURIComponent(highlightParamValue(citation.excerpt))}`}
+                    state={{ returnTo: location.pathname, highlight: citation.excerpt }}
                     className="group/source block rounded-lg border bg-ink-50 p-3 transition-all duration-150 hover:-translate-y-px hover:border-accent-400 hover:shadow dark:bg-ink-950"
                     aria-label={`Open ${citation.document_name} page ${citation.page_number}`}
                   >

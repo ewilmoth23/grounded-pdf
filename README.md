@@ -42,7 +42,8 @@ document content or fabricated interface is shown._
 - Persistent SQLite metadata and a document-filtered Chroma vector index
 - Ollama by default, with an optional OpenAI-compatible chat-completions endpoint
 - Server-sent-event streaming with provider and interrupted-stream failure handling
-- Application-owned inline citations and source cards that open the original PDF page
+- Application-owned inline citations and source cards that open the original PDF page with the
+  cited passage highlighted when text geometry allows
 - Conversation history, document selection, retryable processing, and complete deletion
 - Responsive React interface, safe Markdown rendering, dark mode, and a PDF.js page viewer
 - Deterministic test provider and synthetic PDF; automated tests do not require model access
@@ -250,7 +251,9 @@ sample_documents/  Synthetic sample specification and generated local PDF target
   concurrent multi-user workloads are outside the current design.
 - Image-only pages require separately installed Tesseract and OCR dependencies. The standard Docker
   image does not include them.
-- Citations open a page, not an exact highlighted phrase or bounding box.
+- Exact-passage highlighting depends on the PDF text layer agreeing with the extracted text. When
+  they diverge (typically scanned or OCR pages), the viewer falls back to the page-level citation
+  and says so.
 - Changing the embedding model or chunk geometry requires manual document reprocessing.
 - Local-first does not mean network-free: initial model downloads require network access, and a
   configured remote OpenAI-compatible provider receives retrieved source context.
@@ -260,9 +263,8 @@ sample_documents/  Synthetic sample specification and generated local PDF target
 ## Focused roadmap
 
 1. Add configuration fingerprints and safe bulk re-indexing after embedding/chunk changes.
-2. Highlight exact cited text when reliable PDF text geometry is available.
-3. Add OCR language selection, preprocessing controls, and Docker OCR documentation.
-4. Export conversations with stable page links and source metadata.
+2. Add OCR language selection, preprocessing controls, and Docker OCR documentation.
+3. Export conversations with stable page links and source metadata.
 
 Accounts, cloud sync, web search, autonomous agents, billing, and Kubernetes are intentionally outside
 the first release.

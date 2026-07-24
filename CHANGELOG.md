@@ -24,6 +24,11 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Added
 
+- Exact evidence highlighting: source cards now open the cited page with the cited passage
+  highlighted in the PDF text layer and scrolled into view. Matching normalizes case, whitespace,
+  ligatures, and end-of-line hyphenation, with a longest-shared-run fallback when extraction and
+  the text layer disagree. When the passage cannot be located (typically scanned or OCR pages),
+  the viewer keeps the page-level citation and states that the exact position is unavailable.
 - Styled Markdown rendering for answers via `@tailwindcss/typography` and a self-hosted Inter
   variable font.
 - Conversation auto-titling from the first question, a stop-generation control, restored composer

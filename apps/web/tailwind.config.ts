@@ -65,11 +65,23 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(6px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        /* accent.400 = #45bd9b; keyframes cannot read theme colors. */
+        'evidence-settle': {
+          '0%': {
+            backgroundColor: 'rgb(69 189 155 / 0.8)',
+            boxShadow: '0 0 0 6px rgb(69 189 155 / 0.5)',
+          },
+          '100%': {
+            backgroundColor: 'rgb(69 189 155 / 0.4)',
+            boxShadow: '0 0 0 2px rgb(69 189 155 / 0.35)',
+          },
+        },
       },
       animation: {
         shimmer: 'shimmer 1.6s infinite',
         indeterminate: 'indeterminate 1.4s ease-in-out infinite',
         'message-in': 'message-in 0.25s ease-out both',
+        'evidence-settle': 'evidence-settle 0.9s ease-out both',
       },
       typography: ({ theme }: ThemeUtils) => ({
         DEFAULT: {
