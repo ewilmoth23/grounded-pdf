@@ -32,8 +32,14 @@
     border-color: theme('colors.ink.700');
   }
 
+  /* Note: the `dark:` variant compiles to `.dark *`, which can never match the
+     html element itself, so the dark background is written explicitly. */
   html {
-    @apply bg-ink-50 dark:bg-ink-950;
+    @apply bg-ink-50;
+  }
+
+  html.dark {
+    @apply bg-ink-950;
   }
 
   body {
