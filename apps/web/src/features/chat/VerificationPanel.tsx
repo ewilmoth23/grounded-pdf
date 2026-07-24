@@ -81,7 +81,9 @@ export function VerificationPanel({
     queryKey: ['verification', conversationId, messageId],
     queryFn: () => api.conversations.verify(conversationId, messageId),
     enabled: open,
-    staleTime: Infinity,
+    // Verdicts depend on the document index and settings, both of which can
+    // change; let an open panel refresh instead of caching forever.
+    staleTime: 5 * 60_000,
     retry: false,
   });
 

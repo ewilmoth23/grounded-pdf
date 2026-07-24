@@ -51,7 +51,10 @@ export function toApiError(payload: unknown, status: number): ApiError {
   return new ApiError(fallback, 'api_error', status);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestWithHeaders<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: T; headers: Headers }> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -72,15 +75,45 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw toApiError(payload, response.status);
   }
-  return (await response.json()) as T;
+  return { data: (await response.json()) as T, headers: response.headers };
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await requestWithHeaders<T>(path, init)).data;
+}
+
+/** Largest page the list endpoints accept. */
+const LIST_PAGE_SIZE = 500;
+/** Safety cap so a bad total count can never loop forever. */
+const LIST_MAX_PAGES = 10;
+
+/**
+ * Fetch every page of a paginated list endpoint (the server caps `limit` at
+ * 500), following the `X-Total-Count` response header until all rows arrived.
+ */
+async function requestAllPages<T>(path: string): Promise<T[]> {
+  const items: T[] = [];
+  for (let page = 0; page < LIST_MAX_PAGES; page += 1) {
+    const { data, headers } = await requestWithHeaders<T[]>(
+      `${path}?limit=${LIST_PAGE_SIZE}&offset=${page * LIST_PAGE_SIZE}`,
+    );
+    items.push(...data);
+    const totalHeader = headers.get('X-Total-Count');
+    const total = totalHeader === null ? Number.NaN : Number(totalHeader);
+    const complete = Number.isFinite(total) ? items.length >= total : data.length < LIST_PAGE_SIZE;
+    if (complete || data.length === 0) break;
+  }
+  return items;
 }
 
 export const api = {
   documents: {
-    list: () => request<DocumentRecord[]>('/documents'),
+    list: () => requestAllPages<DocumentRecord>('/documents'),
     get: (id: string) => request<DocumentDetail>(`/documents/${id}`),
     reprocessStale: () =>
-      request<{ queued: number }>('/documents/reprocess-stale', { method: 'POST' }),
+      request<{ queued: number; remaining: number }>('/documents/reprocess-stale', {
+        method: 'POST',
+      }),
     upload: (files: File[]) => {
       const body = new FormData();
       files.forEach((file) => body.append('files', file));
@@ -91,7 +124,7 @@ export const api = {
     fileUrl: (id: string) => `${API_BASE}/documents/${id}/file`,
   },
   conversations: {
-    list: () => request<Conversation[]>('/conversations'),
+    list: () => requestAllPages<Conversation>('/conversations'),
     get: (id: string) => request<ConversationDetail>(`/conversations/${id}`),
     create: (documentIds: string[] = []) =>
       request<Conversation>('/conversations', {

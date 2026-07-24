@@ -27,6 +27,9 @@ from app.services.settings import effective_settings
 router = APIRouter()
 
 MAX_RESULTS = 25
+# Mirrors the conversation document-selection cap; an unbounded filter list
+# would grow the SQL IN clause and vector-store filter without limit.
+MAX_FILTER_DOCUMENTS = 50
 _EXCERPT_LIMIT = 320
 # Over-fetch so results dropped by the score floor or relational revalidation
 # do not leave the page short.
@@ -55,6 +58,12 @@ async def search_passages(
     if not query:
         raise GroundedPdfError(
             "Search query must not be empty", code="validation_error", status_code=422
+        )
+    if document_ids and len(document_ids) > MAX_FILTER_DOCUMENTS:
+        raise GroundedPdfError(
+            f"At most {MAX_FILTER_DOCUMENTS} documents can be searched at once",
+            code="validation_error",
+            status_code=422,
         )
 
     def run() -> SearchResponse:

@@ -63,9 +63,11 @@ export const MessageBubble = memo(function MessageBubble({
       >
         {assistant && compareSections ? (
           <div className="grid gap-3 lg:grid-cols-2" data-testid="compare-sections">
-            {compareSections.map((section) => (
+            {compareSections.map((section, index) => (
               <section
-                key={section.title}
+                // Index-keyed: duplicate document names are possible and the
+                // rendered sections never reorder.
+                key={`${index}-${section.title}`}
                 className="rounded-xl border bg-ink-50 p-3 dark:bg-ink-950"
                 aria-label={`Answer from ${section.title}`}
               >

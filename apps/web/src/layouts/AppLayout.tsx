@@ -18,9 +18,21 @@ function useSearchShortcut() {
   const { pathname } = useLocation();
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'k') {
+        return;
+      }
+      // Never hijack the shortcut away from a field the user is typing in
+      // (composer, rename input, settings form, …).
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      ) {
+        return;
+      }
+      if (pathname !== '/search') {
         event.preventDefault();
-        if (pathname !== '/search') void navigate('/search');
+        void navigate('/search');
       }
     }
     window.addEventListener('keydown', onKeyDown);

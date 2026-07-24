@@ -5,8 +5,11 @@ answer into sentences with a deterministic rule-based splitter (no model), embed
 each sentence, and scores it against the evidence available to the conversation.
 It never mutates the message, its citations, or any retrieval state.
 
-Caching: results are held in a small in-process LRU keyed by message id. A
-message is immutable once persisted, so the cache needs no invalidation; a
+Caching: results are held in a small in-process LRU. Messages are immutable
+once persisted, but verdicts also depend on the evidence scope and thresholds,
+so the key combines the message id with the scoped document ids, their latest
+``updated_at``, and both verdict thresholds. The cache is additionally cleared
+when documents are deleted or reprocessed and when runtime settings change. A
 database column was deliberately avoided because verification is a derived,
 recomputable artifact and adding schema for it would be churn without benefit.
 """
@@ -20,13 +23,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models.entities import ConversationDocument, Message, utc_now
-from app.rag.chat import validate_matches
-from app.rag.grounding import CITATION_MARKER_RE, INSUFFICIENT_EVIDENCE
+from app.models.entities import ConversationDocument, Document, Message, utc_now
+from app.rag.chat import COMPARE_MODE, validate_matches
+from app.rag.grounding import (
+    CITATION_MARKER_RE,
+    GENERATION_FAILED_MESSAGE,
+    INSUFFICIENT_EVIDENCE,
+)
 from app.rag.retrieval import content_tokens
 from app.services.embeddings import EmbeddingProvider
 from app.services.vector_store import VectorMatch, VectorStore
@@ -73,9 +80,14 @@ _ABBREVIATIONS = frozenset(
 # decimal point has no trailing whitespace.
 _BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[]?[A-Z0-9])")
 _TRAILING_WORD_RE = re.compile(r"([A-Za-z][A-Za-z.]*)\.$")
-# Markdown list markers, heading hashes, and blockquote prefixes are noise for
-# claim checking; strip them from the front of each line before splitting.
-_LINE_NOISE_RE = re.compile(r"^\s*(?:[-*+]\s+|\d{1,3}[.)]\s+|#{1,6}\s+|>\s*)+")
+# Markdown headings are document structure (section titles, compare-mode
+# document names), never claims; heading lines are discarded entirely.
+_HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s")
+# Markdown list markers and blockquote prefixes are noise for claim checking;
+# strip them from the front of each line before splitting.
+_LINE_NOISE_RE = re.compile(r"^\s*(?:[-*+]\s+|\d{1,3}[.)]\s+|>\s*)+")
+# A compare answer is "## name" sections; heading lines delimit the sections.
+_COMPARE_HEADING_RE = re.compile(r"^##\s[^\n]*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -110,18 +122,18 @@ def clear_verification_cache() -> None:
         _cache.clear()
 
 
-def _cache_get(message_id: str) -> VerificationResult | None:
+def _cache_get(cache_key: str) -> VerificationResult | None:
     with _cache_lock:
-        result = _cache.get(message_id)
+        result = _cache.get(cache_key)
         if result is not None:
-            _cache.move_to_end(message_id)
+            _cache.move_to_end(cache_key)
         return result
 
 
-def _cache_put(message_id: str, result: VerificationResult) -> None:
+def _cache_put(cache_key: str, result: VerificationResult) -> None:
     with _cache_lock:
-        _cache[message_id] = result
-        _cache.move_to_end(message_id)
+        _cache[cache_key] = result
+        _cache.move_to_end(cache_key)
         while len(_cache) > _CACHE_LIMIT:
             _cache.popitem(last=False)
 
@@ -131,12 +143,15 @@ def split_sentences(text: str) -> list[str]:
 
     Splits on sentence-ending punctuation followed by whitespace and a capital
     letter or digit, protects common abbreviations and decimals, treats every
-    line as its own segment, and drops Markdown list/heading prefixes.
+    line as its own segment, discards heading lines entirely, and drops
+    Markdown list/blockquote prefixes.
     """
     sentences: list[str] = []
     for raw_line in text.splitlines():
+        if _HEADING_LINE_RE.match(raw_line):
+            continue
         line = _LINE_NOISE_RE.sub("", raw_line).strip()
-        if not line:
+        if not line or _HEADING_LINE_RE.match(line):
             continue
         start = 0
         for boundary in _BOUNDARY_RE.finditer(line):
@@ -194,6 +209,47 @@ def _scoped_document_ids(db: Session, message: Message) -> list[str]:
     return list(dict.fromkeys([*selected, *cited]))
 
 
+def _cache_key(db: Session, settings: Settings, message: Message, document_ids: list[str]) -> str:
+    """Key verdicts by everything they depend on, not just the message id.
+
+    The scoped document ids and their latest ``updated_at`` capture index scope
+    changes (reprocessing bumps ``updated_at``); the thresholds capture verdict
+    boundary changes. Computing this is one cheap aggregate query.
+    """
+    latest_update: datetime | None = None
+    if document_ids:
+        latest_update = db.scalar(
+            select(func.max(Document.updated_at)).where(Document.id.in_(document_ids))
+        )
+    return "|".join(
+        [
+            message.id,
+            ",".join(sorted(document_ids)),
+            latest_update.isoformat() if latest_update is not None else "",
+            str(settings.verification_supported_score),
+            str(settings.verification_weak_score),
+        ]
+    )
+
+
+def _claim_text(message: Message, content: str) -> str:
+    """Content that carries checkable claims.
+
+    For compare answers, split on the ``## document`` section boundaries and
+    drop every section whose body is the fixed insufficient-evidence refusal:
+    refusals are canned application text, not claims about the documents.
+    """
+    if message.mode != COMPARE_MODE:
+        return content
+    sections = _COMPARE_HEADING_RE.split(content)
+    kept = [
+        section.strip()
+        for section in sections
+        if section.strip() and section.strip() != INSUFFICIENT_EVIDENCE
+    ]
+    return "\n\n".join(kept)
+
+
 def verify_message(
     db: Session,
     settings: Settings,
@@ -202,25 +258,26 @@ def verify_message(
     message: Message,
 ) -> VerificationResult:
     """Score each sentence of a persisted assistant answer against the documents."""
-    cached = _cache_get(message.id)
+    document_ids = _scoped_document_ids(db, message)
+    cache_key = _cache_key(db, settings, message, document_ids)
+    cached = _cache_get(cache_key)
     if cached is not None:
         return cached
 
     content = message.content.strip()
-    if not content or content == INSUFFICIENT_EVIDENCE:
+    if not content or content in (INSUFFICIENT_EVIDENCE, GENERATION_FAILED_MESSAGE):
         result = VerificationResult(message_id=message.id, generated_at=utc_now(), sentences=())
-        _cache_put(message.id, result)
+        _cache_put(cache_key, result)
         return result
 
     candidates: list[tuple[str, set[str], str]] = []
-    for sentence in split_sentences(content):
+    for sentence in split_sentences(_claim_text(message, content)):
         scoring_text = _scoring_text(sentence)
         tokens = content_tokens(scoring_text)
         if not tokens:
             continue
         candidates.append((sentence, tokens, scoring_text))
 
-    document_ids = _scoped_document_ids(db, message)
     verified: list[VerifiedSentence] = []
     if candidates:
         vectors = embeddings.embed([scoring_text for _, _, scoring_text in candidates])
@@ -253,5 +310,5 @@ def verify_message(
     result = VerificationResult(
         message_id=message.id, generated_at=utc_now(), sentences=tuple(verified)
     )
-    _cache_put(message.id, result)
+    _cache_put(cache_key, result)
     return result

@@ -246,7 +246,7 @@ async def verify_answer(
     """Score each sentence of a persisted assistant answer against the documents.
 
     Read-only and idempotent: the answer is never modified, and results are
-    cached in-process per message (messages are immutable once persisted).
+    cached in-process per message, evidence scope, and verdict thresholds.
     """
 
     def run() -> VerificationResult:

@@ -100,9 +100,13 @@ export function SearchPage() {
   });
 
   const matches = search.data?.matches ?? [];
+  // An active document filter that matches nothing ready is not the same as
+  // an empty library; do not show the upload prompt in that case.
+  const filterMatchedNone = search.data?.documents_available === false && selectedIds.length > 0;
   const noReadyDocuments =
-    (documents.isSuccess && readyDocuments.length === 0) ||
-    search.data?.documents_available === false;
+    !filterMatchedNone &&
+    ((documents.isSuccess && readyDocuments.length === 0) ||
+      search.data?.documents_available === false);
 
   function focusResult(index: number) {
     resultRefs.current[index]?.focus();
@@ -168,7 +172,15 @@ export function SearchPage() {
         )}
       </div>
 
-      {noReadyDocuments ? (
+      {filterMatchedNone ? (
+        <div className="panel">
+          <EmptyState
+            icon={FileSearch}
+            title="None of the selected documents are ready to search."
+            description="Widen the document filter or wait for the selected documents to finish processing."
+          />
+        </div>
+      ) : noReadyDocuments ? (
         <div className="panel">
           <EmptyState
             icon={FileUp}

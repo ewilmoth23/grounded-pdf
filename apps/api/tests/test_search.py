@@ -172,3 +172,13 @@ def test_search_reports_when_no_ready_documents_exist(client: TestClient, db: Se
     payload = response.json()
     assert payload["documents_available"] is False
     assert payload["matches"] == []
+
+
+def test_search_rejects_oversized_document_filters(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/search",
+        params={"q": "anything", "document_ids": [f"doc-{index}" for index in range(51)]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"

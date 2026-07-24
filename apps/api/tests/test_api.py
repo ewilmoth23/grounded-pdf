@@ -387,7 +387,7 @@ def test_reprocess_stale_queues_only_stale_ready_documents(
     response = client.post("/api/v1/documents/reprocess-stale")
 
     assert response.status_code == 202
-    assert response.json() == {"queued": 2}
+    assert response.json() == {"queued": 2, "remaining": 0}
     for document in (fresh, changed, legacy, queued, failed):
         db.refresh(document)
     assert fresh.status == ProcessingStatus.READY
@@ -398,7 +398,22 @@ def test_reprocess_stale_queues_only_stale_ready_documents(
 
     repeat = client.post("/api/v1/documents/reprocess-stale")
     assert repeat.status_code == 202
-    assert repeat.json() == {"queued": 0}
+    assert repeat.json() == {"queued": 0, "remaining": 0}
+
+
+def test_reprocess_stale_claims_a_bounded_batch_per_call(client: TestClient, db: Session) -> None:
+    for index in range(27):
+        _add_indexed_document(
+            db, f"stale{index:02d}", ProcessingStatus.READY, "old|chunk=1|overlap=0"
+        )
+
+    first = client.post("/api/v1/documents/reprocess-stale")
+    assert first.status_code == 202
+    assert first.json() == {"queued": 25, "remaining": 2}
+
+    second = client.post("/api/v1/documents/reprocess-stale")
+    assert second.status_code == 202
+    assert second.json() == {"queued": 2, "remaining": 0}
 
 
 def test_document_detail_serves_stored_outline(

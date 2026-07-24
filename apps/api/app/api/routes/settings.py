@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.exceptions import GroundedPdfError
 from app.db.session import get_db
+from app.rag.verification import clear_verification_cache
 from app.schemas.settings import RuntimeSettingsUpdate, SafeSettingsResponse
 from app.services.settings import effective_settings, update_runtime_settings
 
@@ -45,4 +46,7 @@ def patch_settings(
         updated = update_runtime_settings(db, payload, base)
     except ValueError as exc:
         raise GroundedPdfError(str(exc), code="invalid_settings", status_code=422) from exc
+    # Runtime settings feed retrieval and verification; cached verdicts may no
+    # longer reflect the effective configuration.
+    clear_verification_cache()
     return safe_response(updated)

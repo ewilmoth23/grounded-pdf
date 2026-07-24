@@ -9,6 +9,7 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import FileValidationError, GroundedPdfError
 from app.db.session import get_db
 from app.models.entities import Document, ProcessingStatus
+from app.rag.verification import clear_verification_cache
 from app.schemas.common import DeleteResponse
 from app.schemas.documents import (
     DocumentDetailResponse,
@@ -99,25 +100,33 @@ def list_documents(
     return responses
 
 
+# Each queued document triggers a full re-ingestion; claim a bounded batch per
+# call so one request cannot fan out unbounded background work.
+REPROCESS_BATCH_LIMIT = 25
+
+
 @router.post("/reprocess-stale", response_model=ReprocessStaleResponse, status_code=202)
 def reprocess_stale_documents(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ReprocessStaleResponse:
-    """Queue re-ingestion for every ready document indexed under different settings."""
+    """Queue re-ingestion for stale ready documents, a bounded batch per call."""
     fingerprint = index_fingerprint(effective_settings(db, settings))
-    stale_ids = [
-        document.id
-        for document in db.scalars(
-            select(Document)
-            .where(Document.status == ProcessingStatus.READY)
-            .order_by(Document.created_at)
-        )
-        if is_stale_index(document, fingerprint)
-    ]
+
+    def stale_ready_ids() -> list[str]:
+        return [
+            document.id
+            for document in db.scalars(
+                select(Document)
+                .where(Document.status == ProcessingStatus.READY)
+                .order_by(Document.created_at)
+            )
+            if is_stale_index(document, fingerprint)
+        ]
+
     queued = 0
-    for document_id in stale_ids:
+    for document_id in stale_ready_ids()[:REPROCESS_BATCH_LIMIT]:
         claim = db.execute(
             update(Document)
             .where(Document.id == document_id, Document.status == ProcessingStatus.READY)
@@ -128,7 +137,9 @@ def reprocess_stale_documents(
         queued += 1
         background_tasks.add_task(process_document, document_id)
     db.commit()
-    return ReprocessStaleResponse(queued=queued)
+    # Reprocessing changes the evidence behind cached verification verdicts.
+    clear_verification_cache()
+    return ReprocessStaleResponse(queued=queued, remaining=len(stale_ready_ids()))
 
 
 @router.get("/{document_id}", response_model=DocumentDetailResponse)

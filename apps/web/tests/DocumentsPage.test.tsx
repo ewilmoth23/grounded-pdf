@@ -129,7 +129,7 @@ test('flags stale documents and reprocesses them in one click', async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(jsonResponse([staleDocument]))
-    .mockResolvedValueOnce(jsonResponse({ queued: 1 }, 202))
+    .mockResolvedValueOnce(jsonResponse({ queued: 1, remaining: 0 }, 202))
     .mockImplementation(() =>
       Promise.resolve(jsonResponse([{ ...staleDocument, status: 'queued', stale_index: false }])),
     );

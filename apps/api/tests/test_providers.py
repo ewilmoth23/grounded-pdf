@@ -7,6 +7,12 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.exceptions import ProviderUnavailableError
+from app.providers import factory
+from app.providers.factory import (
+    aclose_chat_providers,
+    clear_chat_provider_cache,
+    create_chat_provider,
+)
 from app.providers.mock import MockChatProvider
 from app.providers.ollama import OllamaProvider
 from app.providers.openai_compatible import OpenAICompatibleProvider
@@ -26,6 +32,29 @@ class UnavailableProvider:
 
 class UnusedRetriever:
     pass
+
+
+@pytest.mark.asyncio
+async def test_provider_cache_is_bounded_and_evictions_are_closed() -> None:
+    clear_chat_provider_cache()
+    try:
+        providers = [
+            create_chat_provider(Settings(model_provider="ollama", model_name=f"model-{index}"))
+            for index in range(6)
+        ]
+        assert len(factory._provider_cache) == 4
+        # The two oldest providers were evicted but parked for shutdown closing.
+        assert factory._evicted_providers == providers[:2]
+        # A cached configuration returns the same instance.
+        assert (
+            create_chat_provider(Settings(model_provider="ollama", model_name="model-5"))
+            is providers[5]
+        )
+        await aclose_chat_providers()
+        assert not factory._provider_cache
+        assert not factory._evicted_providers
+    finally:
+        clear_chat_provider_cache()
 
 
 @pytest.mark.asyncio

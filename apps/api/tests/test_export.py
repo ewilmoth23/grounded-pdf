@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,10 +15,12 @@ from app.models.entities import (
     MessageRole,
     ProcessingStatus,
 )
+from app.rag.chat import COMPARE_MODE
+from app.rag.grounding import INSUFFICIENT_EVIDENCE
 from app.rag.verification import clear_verification_cache
 from app.services.dependencies import get_vector_store
 from app.services.embeddings import DeterministicEmbeddingProvider
-from app.services.export import slugify_title
+from app.services.export import VERIFICATION_TRUNCATED_NOTE, slugify_title
 from app.services.vector_store import VectorRecord
 
 
@@ -71,9 +73,14 @@ def add_message(
     content: str,
     created_at: datetime,
     chunk: DocumentChunk | None = None,
+    mode: str | None = None,
 ) -> Message:
     message = Message(
-        conversation_id=conversation.id, role=role, content=content, created_at=created_at
+        conversation_id=conversation.id,
+        role=role,
+        content=content,
+        created_at=created_at,
+        mode=mode,
     )
     db.add(message)
     db.flush()
@@ -181,6 +188,95 @@ def test_html_export_escapes_untrusted_content(client: TestClient, db: Session) 
     assert "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;" in body
     assert "<title>Quotes &amp; &lt;Escapes&gt;</title>" in body
     assert "trusted.pdf, page 2" in body
+
+
+def test_compare_export_verification_ignores_refusal_and_heading_lines(
+    client: TestClient, db: Session
+) -> None:
+    clear_verification_cache()
+    conversation, chunk = seed_conversation(db)
+    seed_vectors(chunk)
+    add_message(
+        db,
+        conversation,
+        MessageRole.USER,
+        "Compare the findings",
+        datetime(2026, 7, 24, 12, 0, tzinfo=UTC),
+    )
+    add_message(
+        db,
+        conversation,
+        MessageRole.ASSISTANT,
+        "## trusted.pdf\n\n"
+        "The verified result was 37 percent [trusted.pdf, p. 2].\n\n"
+        "## missing.pdf\n\n"
+        f"{INSUFFICIENT_EVIDENCE}",
+        datetime(2026, 7, 24, 12, 1, tzinfo=UTC),
+        chunk,
+        mode=COMPARE_MODE,
+    )
+
+    response = client.get(f"/api/v1/conversations/{conversation.id}/export")
+
+    assert response.status_code == 200
+    # One claim total: the section headings and the refusal section are never
+    # scored, so the summary reflects only the evidenced sentence.
+    assert "Verification: 1 of 1 claim supported" in response.text
+
+
+def test_html_export_renders_answer_markdown_structurally(client: TestClient, db: Session) -> None:
+    clear_verification_cache()
+    conversation, chunk = seed_conversation(db)
+    add_message(
+        db,
+        conversation,
+        MessageRole.ASSISTANT,
+        "## alpha.pdf\n\n"
+        "- First **bold** finding\n"
+        "- Second `code` finding\n\n"
+        "1. Ordered item\n\n"
+        "> A quoted line\n\n"
+        "<script>alert(1)</script> plain *text*.",
+        datetime(2026, 7, 24, 12, 0, tzinfo=UTC),
+        chunk,
+    )
+
+    response = client.get(f"/api/v1/conversations/{conversation.id}/export?format=html")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "<h3>alpha.pdf</h3>" in body
+    assert "<ul><li>First <strong>bold</strong> finding</li>" in body
+    assert "<li>Second <code>code</code> finding</li></ul>" in body
+    assert "<ol><li>Ordered item</li></ol>" in body
+    assert "<blockquote>A quoted line</blockquote>" in body
+    assert "<em>text</em>" in body
+    assert "## alpha.pdf" not in body
+    assert "<script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+
+def test_export_verifies_only_the_most_recent_answers(client: TestClient, db: Session) -> None:
+    clear_verification_cache()
+    conversation, chunk = seed_conversation(db)
+    seed_vectors(chunk)
+    base_time = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+    for index in range(52):
+        add_message(
+            db,
+            conversation,
+            MessageRole.ASSISTANT,
+            f"The verified result was 37 percent in run {index}.",
+            base_time + timedelta(minutes=index),
+            chunk,
+        )
+
+    response = client.get(f"/api/v1/conversations/{conversation.id}/export")
+
+    assert response.status_code == 200
+    body = response.text
+    assert body.count("Verification:") == 50
+    assert VERIFICATION_TRUNCATED_NOTE in body
 
 
 def test_export_survives_verification_failure(

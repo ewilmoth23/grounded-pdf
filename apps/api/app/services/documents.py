@@ -14,6 +14,7 @@ from app.core.config import Settings
 from app.core.exceptions import FileValidationError, GroundedPdfError
 from app.core.security import secure_document_path
 from app.models.entities import Document, DocumentChunk, DocumentPage, ProcessingStatus
+from app.rag.verification import clear_verification_cache
 from app.services.pdf import validate_pdf
 from app.services.storage import StoredUpload, store_upload
 from app.services.vector_store import VectorStore
@@ -111,7 +112,9 @@ def parse_outline(outline_json: str | None) -> list[dict[str, int | str]] | None
         if not isinstance(item, dict):
             continue
         level, title, page = item.get("level"), item.get("title"), item.get("page")
-        if isinstance(level, int) and isinstance(title, str) and isinstance(page, int):
+        # type() rather than isinstance(): bool is an int subclass and a stored
+        # true/false must not read as a valid level or page number.
+        if type(level) is int and isinstance(title, str) and type(page) is int:
             entries.append({"level": level, "title": title, "page": page})
     return entries or None
 
@@ -198,6 +201,8 @@ def delete_document(
             code="deletion_finalize_failed",
             status_code=500,
         ) from exc
+    # The deleted document may back cached verification verdicts.
+    clear_verification_cache()
     logger.info("document_deleted", extra={"document_id": document_id})
 
 

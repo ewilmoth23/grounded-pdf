@@ -7,6 +7,19 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Changed
 
+- Verification results are now cached by message id plus the scoped document ids, their latest
+  `updated_at`, and the verdict thresholds (instead of the message id alone), and the cache is
+  cleared on document deletion, bulk reprocessing, and settings changes, so cached verdicts can no
+  longer outlive the evidence they were computed from. The web verification panel refreshes after
+  five minutes instead of caching forever.
+- Conversation exports verify at most the 50 most recent answers and note the truncation in both
+  formats, HTML exports render answer Markdown (headings, lists, bold/italic/inline code,
+  blockquotes) as real, fully escaped HTML elements instead of literal text, and
+  `POST /documents/reprocess-stale` queues at most 25 documents per call and reports
+  `{queued, remaining}` so clients can keep going until nothing stale remains.
+- The chat provider cache is a four-entry LRU; evicted providers are parked and their shared HTTP
+  clients closed on application shutdown, so repeated settings changes cannot leak connection
+  pools. `GET /search` rejects more than 50 `document_ids` filters.
 - `GET /documents`, `GET /conversations`, and `GET /conversations/{id}/messages` accept `limit`
   (default 100, maximum 500) and `offset` query parameters, return a deterministic order with a
   stable tiebreaker, and report the total row count in an `X-Total-Count` response header. The
@@ -25,6 +38,20 @@ All notable changes to GroundedPDF are documented here. The format follows
 
 ### Fixed
 
+- Compare answers no longer poison verification: Markdown heading lines (including the per-document
+  `## name` section titles) are never treated as claims, refusal sections and the fixed
+  generation-failure placeholder are skipped entirely, so "Verify answer" and export summaries
+  score only real evidence-bearing sentences.
+- The web client pages through `/documents` and `/conversations` using `X-Total-Count` instead of
+  silently truncating libraries at 100 entries, and after a stream error the chat refetches the
+  persisted transcript (which includes the failure placeholder) instead of diverging from the
+  server.
+- ⌘K/Ctrl+K no longer hijacks focus while typing in an input, textarea, select, or contenteditable
+  element, and only prevents the browser default when it actually handles the shortcut.
+- PDF evidence highlighting rejects fallback matches that cover less than half of the cited
+  excerpt (and bounds matching to the first 600 normalized characters), preventing a short generic
+  overlap from highlighting the wrong passage. The search page now distinguishes "no documents
+  uploaded" from "the selected document filter matched nothing ready".
 - Failed answer generation no longer leaves an orphaned question: if retrieval fails, the pending
   user message is rolled back; if generation or persistence fails after the question was saved, a
   fixed "Answer generation failed. Ask again to retry." assistant placeholder is recorded so the

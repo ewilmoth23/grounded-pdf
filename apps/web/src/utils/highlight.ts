@@ -14,6 +14,8 @@
 const MIN_NEEDLE_LENGTH = 8;
 /** Minimum normalized characters a fallback (partial) match must cover. */
 const MIN_FALLBACK_LENGTH = 20;
+/** Cap on the normalized needle used for matching, bounding search cost. */
+const MAX_NEEDLE_LENGTH = 600;
 /** Longest highlight parameter carried in the viewer URL fallback. */
 const HIGHLIGHT_PARAM_MAX_LENGTH = 160;
 
@@ -85,12 +87,13 @@ function normalizeItems(items: readonly string[]): NormalizedHaystack {
   return { text, positions };
 }
 
-/** Longest substring of `needle` present in `haystack`, via binary search on length. */
+/** Longest substring of `needle` (at least `minLength`) present in `haystack`. */
 function longestSharedRun(
   needle: string,
   haystack: string,
+  minLength: number,
 ): { hayStart: number; length: number } | null {
-  let low = MIN_FALLBACK_LENGTH;
+  let low = minLength;
   let high = needle.length;
   let best: { hayStart: number; length: number } | null = null;
   while (low <= high) {
@@ -137,13 +140,15 @@ function toRanges(positions: NormalizedPosition[], start: number, end: number): 
  *
  * Tries an exact normalized match first, then falls back to the longest run
  * the excerpt and the text layer still share (extraction and rendering can
- * disagree at the edges). Returns `null` when nothing trustworthy matches.
+ * disagree at the edges). The fallback must cover at least half of the
+ * excerpt, so a short generic overlap can never highlight the wrong passage.
+ * Returns `null` when nothing trustworthy matches.
  */
 export function findExcerptRanges(
   items: readonly string[],
   excerpt: string,
 ): HighlightRange[] | null {
-  const needle = normalizeExcerpt(excerpt);
+  const needle = normalizeExcerpt(excerpt).slice(0, MAX_NEEDLE_LENGTH);
   if (needle.length < MIN_NEEDLE_LENGTH) return null;
   const haystack = normalizeItems(items);
   if (haystack.text.length === 0) return null;
@@ -153,7 +158,8 @@ export function findExcerptRanges(
     return toRanges(haystack.positions, exact, exact + needle.length);
   }
 
-  const shared = longestSharedRun(needle, haystack.text);
+  const minShared = Math.max(MIN_FALLBACK_LENGTH, Math.floor(needle.length * 0.5));
+  const shared = longestSharedRun(needle, haystack.text, minShared);
   if (shared === null) return null;
   return toRanges(haystack.positions, shared.hayStart, shared.hayStart + shared.length);
 }

@@ -36,11 +36,13 @@ function mockConversationFetch(
   };
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.endsWith('/documents')) return Promise.resolve(jsonResponse(documents));
-    if (url.endsWith('/conversations/c1')) {
+    // List endpoints carry limit/offset query parameters; match on the path.
+    const path = new URL(url, 'http://localhost').pathname;
+    if (path.endsWith('/documents')) return Promise.resolve(jsonResponse(documents));
+    if (path.endsWith('/conversations/c1')) {
       return Promise.resolve(jsonResponse({ ...conversation, messages }));
     }
-    if (url.endsWith('/conversations')) return Promise.resolve(jsonResponse([conversation]));
+    if (path.endsWith('/conversations')) return Promise.resolve(jsonResponse([conversation]));
     return Promise.resolve(jsonResponse([]));
   });
   vi.stubGlobal('fetch', fetchMock);

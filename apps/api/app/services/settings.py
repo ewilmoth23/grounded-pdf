@@ -34,7 +34,13 @@ RUNTIME_KEY_ORDER = (
 
 
 def index_fingerprint(settings: Settings) -> str:
-    """Identify the embedding model and chunk geometry an index was built with."""
+    """Identify the embedding model and chunk geometry an index was built with.
+
+    ``embedding_model`` must stay environment-only (never a RUNTIME_KEY): the
+    embedding provider is cached per process from the environment settings, so
+    a runtime override would let this fingerprint drift from the model that is
+    actually producing query vectors.
+    """
     return (
         f"{settings.embedding_model}|chunk={settings.chunk_size}|overlap={settings.chunk_overlap}"
     )

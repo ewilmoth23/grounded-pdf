@@ -292,9 +292,12 @@ export function ChatPage() {
         setError(
           streamError instanceof Error ? streamError.message : 'The answer stream was interrupted.',
         );
-        setStreamMessages(
-          (current) => current?.filter((message) => message.id !== 'streaming') ?? null,
-        );
+        // The server persisted the question (and a failure placeholder answer);
+        // refetch so the server transcript owns the view instead of a local
+        // copy that would silently drop that exchange.
+        await queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] });
+        await queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        setStreamMessages(null);
         // Give the failed question back to the composer unless the user moved on.
         setQuestion((current) => (current.trim() ? current : value));
       }

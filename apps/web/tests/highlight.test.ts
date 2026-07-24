@@ -52,6 +52,17 @@ test('falls back to the longest shared run when the excerpt edges disagree', () 
   expect(text).toContain('efficiency gain was 37 percent');
 });
 
+test('rejects a short shared run that covers too little of a long excerpt', () => {
+  // ~22 normalized characters overlap, but the excerpt normalizes to ~270
+  // characters; a fallback below half the excerpt must not highlight anything.
+  const shared = 'The efficiency gain was 37';
+  const items = [`Appendix C. ${shared} percent in the second cohort study.`];
+  const filler =
+    'Entirely different subject matter covering harbor logistics and alpine weather routines. ';
+  const excerpt = `${shared} ${filler.repeat(4)}`.slice(0, 320);
+  expect(findExcerptRanges(items, excerpt)).toBeNull();
+});
+
 test('returns null when the excerpt is absent or too short', () => {
   const items = ['The measured efficiency gain was 37 percent.'];
   expect(findExcerptRanges(items, 'orbital speed of Neptune in kilometers per second')).toBeNull();

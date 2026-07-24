@@ -35,6 +35,9 @@ class DocumentDetailResponse(DocumentResponse):
 
 class ReprocessStaleResponse(BaseModel):
     queued: int
+    # Stale documents left unclaimed by this call (the endpoint queues a
+    # bounded batch per request); another call will pick them up.
+    remaining: int
 
 
 class UploadResponse(BaseModel):

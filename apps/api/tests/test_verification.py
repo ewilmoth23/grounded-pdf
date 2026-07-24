@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -13,7 +15,8 @@ from app.models.entities import (
     MessageRole,
     ProcessingStatus,
 )
-from app.rag.grounding import INSUFFICIENT_EVIDENCE
+from app.rag.chat import COMPARE_MODE
+from app.rag.grounding import GENERATION_FAILED_MESSAGE, INSUFFICIENT_EVIDENCE
 from app.rag.verification import clear_verification_cache, split_sentences, verify_message
 from app.services.dependencies import get_vector_store
 from app.services.embeddings import DeterministicEmbeddingProvider
@@ -37,14 +40,15 @@ def test_splitter_keeps_citation_markers_and_strips_markdown_noise() -> None:
     text = (
         "The gain was 37 percent [sample.pdf, p. 2]. A second claim follows.\n"
         "- First finding. Second finding.\n"
-        "## Heading claim."
+        "## Heading line.\n"
+        "> ## Quoted heading line."
     )
+    # Heading lines are document structure, never claims; they are discarded.
     assert split_sentences(text) == [
         "The gain was 37 percent [sample.pdf, p. 2].",
         "A second claim follows.",
         "First finding.",
         "Second finding.",
-        "Heading claim.",
     ]
 
 
@@ -89,9 +93,15 @@ def seed_conversation(db: Session) -> tuple[Conversation, DocumentChunk]:
 
 
 def add_assistant_message(
-    db: Session, conversation: Conversation, content: str, chunk: DocumentChunk | None = None
+    db: Session,
+    conversation: Conversation,
+    content: str,
+    chunk: DocumentChunk | None = None,
+    mode: str | None = None,
 ) -> Message:
-    message = Message(conversation_id=conversation.id, role=MessageRole.ASSISTANT, content=content)
+    message = Message(
+        conversation_id=conversation.id, role=MessageRole.ASSISTANT, content=content, mode=mode
+    )
     db.add(message)
     db.flush()
     if chunk is not None:
@@ -221,3 +231,118 @@ def test_verify_insufficient_evidence_answer_is_empty(client: TestClient, db: Se
 
     assert response.status_code == 200
     assert response.json()["sentences"] == []
+
+
+def test_verify_generation_failure_placeholder_is_empty(db: Session, settings: Settings) -> None:
+    clear_verification_cache()
+    conversation, _ = seed_conversation(db)
+    message = add_assistant_message(db, conversation, GENERATION_FAILED_MESSAGE)
+
+    result = verify_message(
+        db, settings, DeterministicEmbeddingProvider(), InMemoryVectorStore(), message
+    )
+
+    assert result.sentences == ()
+
+
+def test_compare_answer_skips_headings_and_refusal_sections(
+    db: Session, settings: Settings
+) -> None:
+    clear_verification_cache()
+    conversation, chunk = seed_conversation(db)
+    provider = DeterministicEmbeddingProvider()
+    store = InMemoryVectorStore()
+    store.upsert(
+        [
+            VectorRecord(
+                id=chunk.embedding_id,
+                text=chunk.normalized_text,
+                embedding=provider.embed([chunk.normalized_text])[0],
+                metadata={"document_id": chunk.document_id},
+            )
+        ]
+    )
+    content = (
+        "## trusted.pdf\n\n"
+        "The verified result was 37 percent [trusted.pdf, p. 2].\n\n"
+        "## missing.pdf\n\n"
+        f"{INSUFFICIENT_EVIDENCE}"
+    )
+    message = add_assistant_message(db, conversation, content, chunk, mode=COMPARE_MODE)
+
+    result = verify_message(db, settings, provider, store, message)
+
+    # Only the evidenced section's sentence is scored: the document-name
+    # headings are structure and the refusal section is canned text, not claims.
+    assert [sentence.text for sentence in result.sentences] == [
+        "The verified result was 37 percent [trusted.pdf, p. 2]."
+    ]
+    assert result.sentences[0].verdict == "supported"
+
+
+def test_cached_verdicts_recompute_when_a_scoped_document_changes(
+    db: Session, settings: Settings
+) -> None:
+    clear_verification_cache()
+    conversation, chunk = seed_conversation(db)
+    provider = DeterministicEmbeddingProvider()
+    store = InMemoryVectorStore()
+    store.upsert(
+        [
+            VectorRecord(
+                id=chunk.embedding_id,
+                text=chunk.normalized_text,
+                embedding=provider.embed([chunk.normalized_text])[0],
+                metadata={"document_id": chunk.document_id},
+            )
+        ]
+    )
+    message = add_assistant_message(db, conversation, "The verified result was 37 percent.", chunk)
+
+    first = verify_message(db, settings, provider, store, message)
+    assert first.sentences[0].verdict == "supported"
+
+    # Simulate reprocessing: the indexed evidence changed and updated_at moved.
+    store.delete_document(chunk.document_id)
+    document = db.get(Document, chunk.document_id)
+    assert document is not None
+    document.updated_at = document.updated_at + timedelta(seconds=1)
+    db.commit()
+
+    second = verify_message(db, settings, provider, store, message)
+
+    assert second is not first
+    assert second.sentences[0].verdict == "unsupported"
+
+
+def test_settings_patch_clears_the_verification_cache(client: TestClient, db: Session) -> None:
+    conversation, chunk = seed_conversation(db)
+    provider = DeterministicEmbeddingProvider()
+    store = get_vector_store()
+    store.upsert(
+        [
+            VectorRecord(
+                id=chunk.embedding_id,
+                text=chunk.normalized_text,
+                embedding=provider.embed([chunk.normalized_text])[0],
+                metadata={"document_id": chunk.document_id},
+            )
+        ]
+    )
+    assistant = add_assistant_message(
+        db, conversation, "The verified result was 37 percent.", chunk
+    )
+    url = f"/api/v1/conversations/{conversation.id}/messages/{assistant.id}/verify"
+
+    first = client.get(url).json()
+    assert first["sentences"][0]["verdict"] == "supported"
+
+    # The vectors are gone but nothing in the cache key changed: still cached.
+    store.delete_document(chunk.document_id)
+    cached = client.get(url).json()
+    assert cached["sentences"][0]["verdict"] == "supported"
+
+    assert client.patch("/api/v1/settings", json={"retrieval_count": 5}).status_code == 200
+
+    refreshed = client.get(url).json()
+    assert refreshed["sentences"][0]["verdict"] == "unsupported"

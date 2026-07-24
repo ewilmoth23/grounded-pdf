@@ -19,7 +19,12 @@ class OllamaProvider:
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
-        """Lazily create one shared connection-pooling client per provider instance."""
+        """Lazily create one shared connection-pooling client per provider instance.
+
+        The shared ``httpx.AsyncClient`` binds to the event loop it is first
+        used on; that is safe here because uvicorn runs the application on a
+        single event loop for the whole process lifetime.
+        """
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(transport=self.transport)
         return self._client
