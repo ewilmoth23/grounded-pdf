@@ -21,6 +21,28 @@ chat response is not enough and you need a direct path back to the source.
 _Real capture from the Docker application using the repository's generated synthetic PDF. No private
 document content or fabricated interface is shown._
 
+## The three verdicts
+
+Every answer is graded against the documents you selected. All captures below
+are real, from a local Docker run against the repository's generated synthetic
+PDF.
+
+![A supported answer: MIT, cited to page 1, graded Supported with 1 of 1 claims supported](docs/images/groundedpdf-supported.jpg)
+
+*Supported — the claim was found on the cited page.*
+
+![An answer of "There is not enough evidence", with two retrieved sources shown and the claim graded Not found](docs/images/groundedpdf-abstention.jpg)
+
+*Not found — asked something the document doesn't cover, GroundedPDF declines
+rather than guessing, and the verifier grades even that refusal.*
+
+The third verdict, **Weak match**, sits between them: retrieved evidence that
+doesn't clearly carry the claim. It is deliberately not a pass.
+
+![The document library after upload, showing extraction and embedding complete](docs/images/groundedpdf-library.jpg)
+
+*Text is extracted and embedded locally before a document becomes answerable.*
+
 ## Why GroundedPDF
 
 - **Local by default:** PDFs, metadata, chat history, embeddings, and vector data stay in local
