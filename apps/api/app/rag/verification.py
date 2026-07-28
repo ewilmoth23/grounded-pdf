@@ -180,12 +180,28 @@ def _excerpt(text: str) -> str:
     return collapsed
 
 
+# Claims at or above this many content tokens are scored by the cosine/overlap
+# blend unchanged; shorter ones lean progressively on lexical overlap.
+_COSINE_CONFIDENCE_TOKENS = 8
+
+
 def _combined_score(sentence_tokens: set[str], match: VectorMatch) -> float:
     """Blend cosine similarity with the retrieval term-overlap heuristic."""
     cosine = max(0.0, min(1.0, match.score))
     chunk_tokens = content_tokens(match.text)
     overlap = len(sentence_tokens & chunk_tokens) / len(sentence_tokens) if sentence_tokens else 0.0
-    return round(0.5 * cosine + 0.5 * overlap, 4)
+    blended = 0.5 * cosine + 0.5 * overlap
+    # A terse answer ("six-week", "37 percent") embeds poorly: cosine compares a
+    # two-token fragment against a whole page chunk and comes back low, dragging a
+    # claim with perfect term overlap below the supported threshold. Lean on lexical
+    # overlap when the claim is short and on the blend as it lengthens. This never
+    # raises a score that overlap alone doesn't already justify, so a claim the
+    # evidence does not contain cannot be promoted by it.
+    confidence_in_cosine = min(len(sentence_tokens), _COSINE_CONFIDENCE_TOKENS) / (
+        _COSINE_CONFIDENCE_TOKENS
+    )
+    weighted = (1.0 - confidence_in_cosine) * overlap + confidence_in_cosine * blended
+    return round(weighted, 4)
 
 
 def _verdict(score: float, settings: Settings) -> Verdict:
