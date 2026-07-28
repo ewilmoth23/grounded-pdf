@@ -106,6 +106,46 @@ def test_untrusted_inline_citation_markers_are_removed(settings: Settings) -> No
     assert answer.endswith("[alpha.pdf, p. 7]")
 
 
+def test_hash_prefixed_marker_is_stripped_from_the_persisted_answer(
+    settings: Settings,
+) -> None:
+    """Regression: a hash-prefixed marker reached the stored answer and polluted
+    the claim string sent to the verifier, downgrading a supported fact to a weak
+    match against the wrong page."""
+    provider = DeterministicEmbeddingProvider()
+    store = InMemoryVectorStore()
+    store.upsert([make_record(provider, "a1", "alpha", "Supported evidence is here.", 7)])
+    citations = build_citations(
+        store.query(provider.embed(["Supported evidence"])[0], ["alpha"], 1)
+    )
+
+    answer = ensure_inline_citation(
+        "37 percent #alpha.pdf, p. 7 [alpha.pdf, p. 7]",
+        citations,
+    )
+
+    assert "#alpha.pdf" not in answer
+    assert answer.count("[alpha.pdf, p. 7]") == 1
+    assert answer.startswith("37 percent [")
+    assert "  " not in answer
+
+
+def test_markdown_headings_survive_hash_marker_stripping(settings: Settings) -> None:
+    provider = DeterministicEmbeddingProvider()
+    store = InMemoryVectorStore()
+    store.upsert([make_record(provider, "a1", "alpha", "Supported evidence is here.", 7)])
+    citations = build_citations(
+        store.query(provider.embed(["Supported evidence"])[0], ["alpha"], 1)
+    )
+
+    answer = ensure_inline_citation(
+        "# Findings\n\nThe gain held, p. 7 of the brief. [alpha.pdf, p. 7]",
+        citations,
+    )
+
+    assert answer.startswith("# Findings")
+
+
 def test_untrusted_citation_markers_are_filtered_across_stream_tokens(
     settings: Settings,
 ) -> None:

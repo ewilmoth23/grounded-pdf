@@ -14,6 +14,18 @@ GENERATION_FAILED_MESSAGE = "Answer generation failed. Ask again to retry."
 CITATION_MARKER_RE = re.compile(r"\[[^\]\n]{1,255},\s*p\.\s*[0-9]+\]", re.IGNORECASE)
 PARENTHETICAL_CITATION_RE = re.compile(r"\([^()\n]{1,255},\s*p\.\s*[0-9]+\)", re.IGNORECASE)
 NUMERIC_REFERENCE_RE = re.compile(r"\[(?:[0-9]{1,3}|source\s+[0-9]{1,3})\]", re.IGNORECASE)
+# Some providers emit the marker hash-prefixed and unbracketed — "#doc.pdf, p. 2".
+# It is never a valid marker, but it survived the bracket-oriented filters above and
+# reached the persisted answer, where it polluted the claim string handed to the
+# verifier: a directly supported fact graded as a weak match against the wrong page.
+# The negative lookahead for whitespace keeps Markdown headings ("# Findings") intact.
+HASH_CITATION_RE = re.compile(
+    r"#(?!\s)[^#\n\[\]()]{1,255}?,\s*p\.\s*[0-9]+", re.IGNORECASE
+)
+INCOMPLETE_HASH_CITATION_RE = re.compile(
+    r"#(?!\s)[^#\n\[\]()]{1,255}?,\s*p\.?\s*[0-9]*\s*$", re.IGNORECASE
+)
+_REPEATED_SPACE_RE = re.compile(r"[ \t]{2,}")
 GROUNDING_WRAPPER_RE = re.compile(
     r"\(\s*GROUNDING\s*:\s*(\[[^\]\n]{1,255},\s*p\.\s*[0-9]+\])\s*\)",
     re.IGNORECASE,
@@ -148,6 +160,12 @@ def ensure_inline_citation(answer: str, citations: list[GroundedCitation]) -> st
     allowed = {citation.marker for citation in citations}
     cleaned = INCOMPLETE_CITATION_RE.sub("", answer)
     cleaned = INCOMPLETE_NUMERIC_REFERENCE_RE.sub("", cleaned)
+    # Dropped rather than rewritten to a bracketed marker: the model almost always
+    # emits the hash form alongside a correct marker, so converting it would leave a
+    # duplicate. Removing it is safe because a valid marker is appended below when
+    # none survives.
+    cleaned = INCOMPLETE_HASH_CITATION_RE.sub("", cleaned)
+    cleaned = HASH_CITATION_RE.sub("", cleaned)
     cleaned = GROUNDING_WRAPPER_RE.sub(
         lambda match: match.group(1) if match.group(1) in allowed else "", cleaned
     )
@@ -155,7 +173,8 @@ def ensure_inline_citation(answer: str, citations: list[GroundedCitation]) -> st
         lambda match: match.group(0) if match.group(0) in allowed else "", cleaned
     )
     cleaned = PARENTHETICAL_CITATION_RE.sub("", cleaned)
-    cleaned = NUMERIC_REFERENCE_RE.sub("", cleaned).strip()
+    cleaned = NUMERIC_REFERENCE_RE.sub("", cleaned)
+    cleaned = _REPEATED_SPACE_RE.sub(" ", cleaned).strip()
     if any(marker in cleaned for marker in allowed):
         return cleaned
     return f"{cleaned.rstrip()} {citations[0].marker}".strip()
