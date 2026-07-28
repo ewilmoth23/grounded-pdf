@@ -6,6 +6,22 @@
 [![Node 22+](https://img.shields.io/badge/node-22+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Local-first LLM](https://img.shields.io/badge/LLM-local--first-000000?logo=ollama&logoColor=white)](https://ollama.com/)
 
+
+## Project status
+
+> **Actively developed, pre-1.0.** This is a personal project built in the open, published so the
+> work can be read and run. It is not a supported product.
+
+Known gaps and caveats, stated up front:
+
+- Two fixes landed after the last full test run (citation-marker stripping, short-claim scoring). Both are verified by hand in a live Docker run, but the suite has not been re-run against them.
+- A hash-prefixed citation marker can flash briefly during token streaming; the persisted answer is correct.
+- Local, single-user, no authentication. Do not expose it to the internet.
+
+Issues and pull requests are welcome. If something breaks on first run, that is
+useful information — please open an issue rather than assuming it works for
+everyone else.
+
 **Ask questions of your PDFs locally—and verify every supported answer on the cited page.**
 
 GroundedPDF is a local-first document research application. It extracts PDFs page by page, indexes
