@@ -14,7 +14,7 @@
 
 Known gaps and caveats, stated up front:
 
-- Two fixes landed after the last full test run (citation-marker stripping, short-claim scoring). Both are verified by hand in a live Docker run, but the suite has not been re-run against them.
+- The console scripts in `.venv/bin/` break if the checkout path contains spaces — a shebang cannot hold them, so pip writes a `/bin/sh` trampoline that can fall through to the system Python. Run `python -m pytest` instead of the `pytest` script, or clone somewhere without spaces.
 - A hash-prefixed citation marker can flash briefly during token streaming; the persisted answer is correct.
 - Local, single-user, no authentication. Do not expose it to the internet.
 
@@ -41,7 +41,7 @@ document content or fabricated interface is shown._
 
 Every answer is graded against the documents you selected. All captures below
 are real, from a local Docker run against the repository's generated synthetic
-PDF.
+PDF. Suite status at time of capture: **128 passed**.
 
 ![A supported answer: MIT, cited to page 1, graded Supported with 1 of 1 claims supported](docs/images/groundedpdf-supported.jpg)
 
