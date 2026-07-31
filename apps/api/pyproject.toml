@@ -24,14 +24,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "mypy>=1.11,<2",
+  "mypy>=1.11,<3",
   "pre-commit>=3.8,<5",
-  "pytest>=8.3,<9",
-  "pytest-asyncio>=0.24,<1",
-  "pytest-cov>=5,<7",
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.24,<2",
+  "pytest-cov>=5,<8",
   "ruff>=0.6,<1",
 ]
-ocr = ["pytesseract>=0.3.13,<1", "pillow>=10,<12"]
+ocr = ["pytesseract>=0.3.13,<1", "pillow>=10,<13"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
